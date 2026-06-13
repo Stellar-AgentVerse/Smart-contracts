@@ -1,7 +1,6 @@
-use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Val, Vec};
 
 use crate::storage::types::{DataKey, Prompt};
-use my_token::MyTokenClient;
 
 /// Contract errors for prompt-marketplace operations.
 #[contracterror]
@@ -105,8 +104,9 @@ impl PromptMarketplace {
         // because `buyer` signs the top-level invocation, Soroban
         // forwards the auth to `MyToken::sell` → `seller.require_auth()`.
         let token = Self::get_token(e);
-        let token_client = MyTokenClient::new(e, &token);
-        token_client.sell(&buyer, &prompt.price);
+        let sell_sym = symbol_short!("sell");
+        let sell_args: Vec<Val> = vec![&e, buyer.clone().into_val(e), prompt.price.into_val(e)];
+        let _: () = e.invoke_contract(&token, &sell_sym, sell_args);
 
         // Mark the purchase so has_access returns true.
         let purchase_key = DataKey::Purchase(buyer, prompt_id);
@@ -124,8 +124,9 @@ impl PromptMarketplace {
         assert!(amount > 0, "amount must be positive");
 
         let token = Self::get_token(e);
-        let token_client = MyTokenClient::new(e, &token);
-        token_client.mint(&to, &amount);
+        let mint_sym = symbol_short!("mint");
+        let mint_args: Vec<Val> = vec![&e, to.into_val(e), amount.into_val(e)];
+        let _: () = e.invoke_contract(&token, &mint_sym, mint_args);
     }
 
     // ─── Queries ─────────────────────────────────────────────

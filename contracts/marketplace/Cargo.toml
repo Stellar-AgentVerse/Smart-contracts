@@ -10,6 +10,8 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 my-token = { path = "../tokens" }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]

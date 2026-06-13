@@ -2,7 +2,7 @@ use soroban_sdk::{Address, Env, MuxedAddress, String};
 use stellar_tokens::fungible::Base;
 use stellar_access::ownable;
 
-use crate::events::{Mint, Sell, Transfer};
+use crate::events::{MintEvent, SellEvent, TransferEvent};
 
 pub struct TokenManager;
 
@@ -15,7 +15,7 @@ impl TokenManager {
     pub fn mint(e: &Env, to: &Address, amount: i128) {
         ownable::enforce_owner_auth(e);
         Base::mint(e, to, amount);
-        Mint {
+        MintEvent {
             admin: ownable::get_owner(e).unwrap(),
             to: to.clone(),
             amount,
@@ -25,7 +25,7 @@ impl TokenManager {
 
     pub fn transfer(e: &Env, from: &Address, to: &MuxedAddress, amount: i128) {
         Base::transfer(e, from, to, amount);
-        Transfer {
+        TransferEvent {
             from: from.clone(),
             to: to.clone(),
             amount,
@@ -40,7 +40,7 @@ impl TokenManager {
     pub fn sell(e: &Env, seller: &Address, amount: i128) {
         seller.require_auth();
         Base::burn(e, seller, amount);
-        Sell {
+        SellEvent {
             seller: seller.clone(),
             amount,
         }

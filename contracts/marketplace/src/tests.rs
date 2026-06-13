@@ -208,6 +208,226 @@ fn test_get_price_unregistered_panics() {
     mkt.get_price(&String::from_str(&env, "ghost"));
 }
 
+// ─── Adversarial: auth boundaries ─────────────────────────
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_non_admin_cannot_register() {
+    let Ctx { env, mkt, mkt_id, buyer, creator, .. } = setup_env();
+    let pid = String::from_str(&env, "hack");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 100i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &100, &creator);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_non_admin_cannot_update_price() {
+    let Ctx { env, mkt, mkt_id, admin, creator, buyer, .. } = setup_env();
+    let pid = String::from_str(&env, "guarded");
+
+    // Admin registers
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 100i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &100, &creator);
+
+    // Non-admin tries to update
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "update_price",
+            args: (&pid, 999i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .update_price(&pid, &999);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_non_admin_cannot_remove() {
+    let Ctx { env, mkt, mkt_id, admin, creator, buyer, .. } = setup_env();
+    let pid = String::from_str(&env, "protected");
+
+    // Admin registers
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 100i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &100, &creator);
+
+    // Non-admin tries to remove
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "remove_prompt",
+            args: (&pid,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .remove_prompt(&pid);
+}
+
+// ─── Adversarial: edge values and state transitions ────
+
+#[test]
+#[should_panic(expected = "price must be positive")]
+fn test_register_zero_price_panics() {
+    let Ctx { env, mkt, mkt_id, admin, creator, .. } = setup_env();
+    let pid = String::from_str(&env, "free");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 0i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &0, &creator);
+}
+
+#[test]
+#[should_panic(expected = "price must be positive")]
+fn test_update_price_zero_panics() {
+    let Ctx { env, mkt, mkt_id, admin, creator, .. } = setup_env();
+    let pid = String::from_str(&env, "discount");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 100i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &100, &creator);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "update_price",
+            args: (&pid, 0i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .update_price(&pid, &0);
+}
+
+#[test]
+fn test_register_max_price() {
+    let Ctx { env, mkt, mkt_id, admin, creator, .. } = setup_env();
+    let pid = String::from_str(&env, "max");
+    let max_price = i128::MAX;
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, max_price, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &max_price, &creator);
+
+    assert_eq!(mkt.get_price(&pid), max_price);
+}
+
+#[test]
+#[should_panic(expected = "prompt not found")]
+fn test_update_unregistered_prompt_panics() {
+    let Ctx { env, mkt, mkt_id, admin, .. } = setup_env();
+    let pid = String::from_str(&env, "phantom");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "update_price",
+            args: (&pid, 500i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .update_price(&pid, &500);
+}
+
+#[test]
+fn test_register_after_remove() {
+    let Ctx { env, mkt, mkt_id, admin, creator, .. } = setup_env();
+    let pid = String::from_str(&env, "reborn");
+
+    // Register
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 100i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &100, &creator);
+
+    // Remove
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "remove_prompt",
+            args: (&pid,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .remove_prompt(&pid);
+
+    // Re-register
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 200i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &200, &creator);
+
+    assert_eq!(mkt.get_price(&pid), 200);
+}
+
+#[test]
+fn test_has_access_unregistered() {
+    let Ctx { env, mkt, buyer, .. } = setup_env();
+    let pid = String::from_str(&env, "unknown");
+    assert!(!mkt.has_access(&buyer, &pid));
+}
+
 // ─── Token storage tests (via as_contract, no auth needed) ─
 
 #[test]
