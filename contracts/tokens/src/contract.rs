@@ -1,7 +1,7 @@
 use soroban_sdk::{contract, contractimpl, Address, Env, MuxedAddress, String};
 use stellar_tokens::fungible::{Base, FungibleToken};
 use stellar_tokens::fungible::burnable::FungibleBurnable;
-use stellar_access::ownable::{self, Ownable};
+use stellar_access::ownable::Ownable;
 use stellar_contract_utils::pausable::{self as pausable, Pausable};
 use stellar_macros::{only_owner, when_not_paused};
 

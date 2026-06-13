@@ -4,9 +4,7 @@ mod contract;
 mod core {
     pub mod token;
 }
-mod events {
-    pub mod handler;
-}
+mod events;
 mod storage {
     pub mod types;
 }
