@@ -1,12 +1,4 @@
-use soroban_sdk::{contracttype, contracterror};
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DataKey {
-    /// Tracks the current app version for monotonic post-upgrade migrations.
-    AppVersion,
-}
-
+use soroban_sdk::contracterror;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

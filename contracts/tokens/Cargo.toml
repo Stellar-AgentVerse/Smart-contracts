@@ -10,10 +10,10 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-stellar-access = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
-stellar-contract-utils = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
-stellar-tokens = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
-stellar-macros = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
+stellar-access = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.7.1" }
+stellar-contract-utils = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.7.1" }
+stellar-tokens = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.7.1" }
+stellar-macros = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.7.1" }
 
-[dev-dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

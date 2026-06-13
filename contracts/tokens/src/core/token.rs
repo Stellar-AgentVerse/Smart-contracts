@@ -14,7 +14,7 @@ impl TokenManager {
     pub fn mint(e: &Env, to: &Address, amount: i128) {
         ownable::enforce_owner_auth(e);
         Base::mint(e, to, amount);
-        TokenEvents::mint(e, ownable::owner(e), to.clone(), amount);
+        TokenEvents::mint(e, ownable::get_owner(e).unwrap(), to.clone(), amount);
     }
 
     pub fn transfer(e: &Env, from: &Address, to: &MuxedAddress, amount: i128) {

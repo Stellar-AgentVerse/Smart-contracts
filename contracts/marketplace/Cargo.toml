@@ -1,0 +1,17 @@
+[package]
+name = "prompt-marketplace"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+my-token = { path = "../tokens" }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+stellar-tokens = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.7.1" }

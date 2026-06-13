@@ -3,20 +3,17 @@ use stellar_tokens::fungible::{Base, FungibleToken};
 use stellar_tokens::fungible::burnable::FungibleBurnable;
 use stellar_access::ownable::{self, Ownable};
 use stellar_contract_utils::pausable::{self as pausable, Pausable};
-use stellar_contract_utils::upgradeable::UpgradeableInternal;
-use stellar_macros::{only_owner, when_not_paused, Upgradeable};
+use stellar_macros::{only_owner, when_not_paused};
 
 use crate::core::token::TokenManager;
-use crate::storage::types::DataKey;
 
 // SEP-0046 contract metadata embedded in the WASM binary.
 soroban_sdk::contractmeta!(
     key = "Description",
-    val = "MyToken — SEP-0041 fungible token with owner-gated minting, pausability, and upgradeability"
+    val = "MyToken — SEP-0041 fungible token with owner-gated minting and pausability"
 );
 soroban_sdk::contractmeta!(key = "Version", val = "0.1.0");
 
-#[derive(Upgradeable)]
 #[contract]
 pub struct MyToken;
 
@@ -40,24 +37,39 @@ impl MyToken {
         TokenManager::sell(e, &seller, amount);
     }
 
-    /// Post-upgrade state migration. `new_version` must be strictly greater
-    /// than the previously recorded version (starts at 0). Callable by owner
-    /// only — ensures migrations are monotonic and idempotent.
-    #[only_owner]
-    pub fn migrate(e: &Env, new_version: u32) {
-        let current: u32 = e
-            .storage()
-            .instance()
-            .get(&DataKey::AppVersion)
-            .unwrap_or(0);
-        assert!(new_version > current);
-        e.storage().instance().set(&DataKey::AppVersion, &new_version);
-    }
 }
 
-#[contractimpl(contracttrait)]
+#[contractimpl]
 impl FungibleToken for MyToken {
     type ContractType = Base;
+
+    fn balance(e: &Env, account: Address) -> i128 {
+        Base::balance(e, &account)
+    }
+
+    fn total_supply(e: &Env) -> i128 {
+        Base::total_supply(e)
+    }
+
+    fn decimals(e: &Env) -> u32 {
+        Base::decimals(e)
+    }
+
+    fn name(e: &Env) -> String {
+        Base::name(e)
+    }
+
+    fn symbol(e: &Env) -> String {
+        Base::symbol(e)
+    }
+
+    fn allowance(e: &Env, owner: Address, spender: Address) -> i128 {
+        Base::allowance(e, &owner, &spender)
+    }
+
+    fn approve(e: &Env, owner: Address, spender: Address, amount: i128, live_until_ledger: u32) {
+        Base::approve(e, &owner, &spender, amount, live_until_ledger);
+    }
 
     #[when_not_paused]
     fn transfer(e: &Env, from: Address, to: MuxedAddress, amount: i128) {
@@ -72,7 +84,7 @@ impl FungibleToken for MyToken {
 
 /// SEP-0041 requires `FungibleBurnable` for full compliance.
 /// Both `burn` and `burn_from` are blocked while the contract is paused.
-#[contractimpl(contracttrait)]
+#[contractimpl]
 impl FungibleBurnable for MyToken {
     #[when_not_paused]
     fn burn(e: &Env, from: Address, amount: i128) {
@@ -102,11 +114,5 @@ impl Pausable for MyToken {
     }
 }
 
-#[contractimpl(contracttrait)]
+#[contractimpl]
 impl Ownable for MyToken {}
-
-impl UpgradeableInternal for MyToken {
-    fn _require_auth(e: &Env, _operator: &Address) {
-        ownable::enforce_owner_auth(e);
-    }
-}
