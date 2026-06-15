@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Val, Vec};
+use soroban_sdk::{contract, contractevent, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Val, Vec};
 
 use crate::storage::types::{DataKey, Prompt};
 
@@ -12,6 +12,64 @@ pub enum MktError {
     PriceMustBePositive = 3,
     Unauthorized = 4,
     AlreadyRegistered = 5,
+}
+
+// ─── Events ────────────────────────────────────────────────
+
+/// Emitted when an admin registers a new prompt.
+#[contractevent(data_format = "map", topics = ["prompt_registered"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptRegistered {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub prompt_id: String,
+    pub price: i128,
+    pub owner: Address,
+    pub content_uri: String,
+}
+
+/// Emitted when an admin updates a prompt's price.
+#[contractevent(data_format = "single-value", topics = ["prompt_price_updated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptPriceUpdated {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub prompt_id: String,
+    pub new_price: i128,
+}
+
+/// Emitted when an admin removes a prompt.
+#[contractevent(data_format = "single-value", topics = ["prompt_removed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptRemoved {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub prompt_id: String,
+}
+
+/// Emitted when a user buys a prompt (tokens burned).
+#[contractevent(data_format = "single-value", topics = ["prompt_purchased"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptPurchased {
+    #[topic]
+    pub buyer: Address,
+    #[topic]
+    pub prompt_id: String,
+    pub price: i128,
+}
+
+/// Emitted when admin re-mints tokens into circulation.
+#[contractevent(data_format = "single-value", topics = ["tokens_reminted"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokensReminted {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub to: Address,
+    pub amount: i128,
 }
 
 /// A Soroban contract that lets admins register prompts for sale,
@@ -66,10 +124,19 @@ impl PromptMarketplace {
 
         let prompt = Prompt {
             price,
-            owner,
-            content_uri,
+            owner: owner.clone(),
+            content_uri: content_uri.clone(),
         };
         e.storage().instance().set(&key, &prompt);
+
+        PromptRegistered {
+            admin: Self::get_admin(e),
+            prompt_id,
+            price: prompt.price,
+            owner,
+            content_uri,
+        }
+        .publish(e);
     }
 
     /// Change the price of an existing prompt.
@@ -85,13 +152,26 @@ impl PromptMarketplace {
             .expect("prompt not found");
         prompt.price = new_price;
         e.storage().instance().set(&key, &prompt);
+
+        PromptPriceUpdated {
+            admin: Self::get_admin(e),
+            prompt_id,
+            new_price,
+        }
+        .publish(e);
     }
 
     /// Remove a prompt from the marketplace entirely.
     pub fn remove_prompt(e: &Env, prompt_id: String) {
         Self::enforce_admin(e);
-        let key = DataKey::Prompt(prompt_id);
+        let key = DataKey::Prompt(prompt_id.clone());
         e.storage().instance().remove(&key);
+
+        PromptRemoved {
+            admin: Self::get_admin(e),
+            prompt_id,
+        }
+        .publish(e);
     }
 
     // ─── User: purchase flow ─────────────────────────────────
@@ -120,8 +200,15 @@ impl PromptMarketplace {
         let _: () = e.invoke_contract(&token, &sell_sym, sell_args);
 
         // Mark the purchase so has_access returns true.
-        let purchase_key = DataKey::Purchase(buyer, prompt_id);
+        let purchase_key = DataKey::Purchase(buyer.clone(), prompt_id.clone());
         e.storage().instance().set(&purchase_key, &true);
+
+        PromptPurchased {
+            buyer,
+            prompt_id,
+            price: prompt.price,
+        }
+        .publish(e);
     }
 
     // ─── Admin: re-mint tokens ───────────────────────────────
@@ -136,8 +223,15 @@ impl PromptMarketplace {
 
         let token = Self::get_token(e);
         let mint_sym = symbol_short!("mint");
-        let mint_args: Vec<Val> = vec![&e, to.into_val(e), amount.into_val(e)];
+        let mint_args: Vec<Val> = vec![&e, to.clone().into_val(e), amount.into_val(e)];
         let _: () = e.invoke_contract(&token, &mint_sym, mint_args);
+
+        TokensReminted {
+            admin: Self::get_admin(e),
+            to,
+            amount,
+        }
+        .publish(e);
     }
 
     // ─── Queries ─────────────────────────────────────────────
