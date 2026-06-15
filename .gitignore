@@ -21,3 +21,6 @@ Thumbs.db
 *~
 *.swp
 test_snapshots/
+.atl/
+.engram/
+openspec/
