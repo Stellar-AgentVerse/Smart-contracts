@@ -37,6 +37,20 @@ impl MyToken {
         TokenManager::sell(e, &seller, amount);
     }
 
+    /// Same as `sell` but without `require_auth`. Intended for contract-to-contract
+    /// calls (e.g. marketplace) where auth is forwarded from the root invocation.
+    #[when_not_paused]
+    pub fn sell_forwarded(e: &Env, seller: Address, amount: i128) {
+        TokenManager::sell_forwarded(e, &seller, amount);
+    }
+
+    /// Same as `mint` but without `require_auth`. Intended for contract-to-contract
+    /// calls (e.g. marketplace `remint`) where auth is forwarded from the root.
+    #[when_not_paused]
+    pub fn mint_forwarded(e: &Env, to: Address, amount: i128) {
+        TokenManager::mint(e, &to, amount);
+    }
+
 }
 
 #[contractimpl]

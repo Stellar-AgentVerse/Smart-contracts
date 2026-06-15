@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractevent, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Val, Vec};
+use soroban_sdk::{contract, contractevent, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Symbol, Val, Vec};
 
 use crate::storage::types::{DataKey, Prompt};
 
@@ -177,7 +177,7 @@ impl PromptMarketplace {
     // ─── User: purchase flow ─────────────────────────────────
 
     /// Buy a prompt. The buyer authenticates, their tokens are burned
-    /// via `MyToken::sell`, and the buyer gains access to the prompt.
+    /// via `MyToken::sell_forwarded`, and the buyer gains access to the prompt.
     ///
     /// This is idempotent in storage — buying again is a no-op
     /// (tokens are burned each time though, so the caller pays again).
@@ -191,11 +191,12 @@ impl PromptMarketplace {
             .get(&key)
             .expect("prompt not found");
 
-        // Burn tokens from the buyer via the MyToken sell function.
-        // because `buyer` signs the top-level invocation, Soroban
-        // forwards the auth to `MyToken::sell` → `seller.require_auth()`.
+        // Burn tokens from the buyer via `sell_forwarded` — this function
+        // trusts the root invocation's auth (buyer.require_auth() above)
+        // and does NOT call require_auth again, avoiding Soroban's
+        // "frame is already authorized" error.
         let token = Self::get_token(e);
-        let sell_sym = symbol_short!("sell");
+        let sell_sym = Symbol::new(e, "sell_forwarded");
         let sell_args: Vec<Val> = vec![&e, buyer.clone().into_val(e), prompt.price.into_val(e)];
         let _: () = e.invoke_contract(&token, &sell_sym, sell_args);
 
@@ -215,14 +216,16 @@ impl PromptMarketplace {
 
     /// Re-mint tokens back into circulation.
     /// The admin can put burned tokens back on the market.
-    /// Only works if the admin is also the owner of the MyToken contract
-    /// (or if the token's `only_owner` check passes via forwarded auth).
+    /// Calls `mint_forwarded` (no auth check) because `enforce_admin` above
+    /// already verified the admin's authorization at the root level. Calling
+    /// the regular `mint` (with `only_owner`) would trigger a double
+    /// `require_auth` for the same address.
     pub fn remint(e: &Env, to: Address, amount: i128) {
         Self::enforce_admin(e);
         assert!(amount > 0, "amount must be positive");
 
         let token = Self::get_token(e);
-        let mint_sym = symbol_short!("mint");
+        let mint_sym = Symbol::new(e, "mint_forwarded");
         let mint_args: Vec<Val> = vec![&e, to.clone().into_val(e), amount.into_val(e)];
         let _: () = e.invoke_contract(&token, &mint_sym, mint_args);
 

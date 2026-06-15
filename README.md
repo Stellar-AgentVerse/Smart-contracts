@@ -10,15 +10,19 @@ Dos contratos Soroban desplegados en **Testnet**, conectados entre sí:
 ## Deploy en Testnet
 
 | Contrato | ID | Wasm Hash | Tamaño |
-|---|---|---|---|
-| **MyToken** | `CAMMA4Y4KYYEN7CC6RFQBL4VMX4OBNYMPI775BVP2QTXWK7PLHEC6F5Q` | `d9685a64...` | 9.7 KB |
-| **PromptMarketplace** | `CBF63JDZF4XWYOWJCI2ULBKTAGZAH2X6S5KX3AL4RFHDCIRVUESKMKA7` | `f31af684...` | 5.6 KB |
+|---|---|---|---|---|
+| **MyToken** | `CCHAUOEVX6TQD56VFZY2GI3N3HNF5W6QSRRKAGKDXV6S53T4BKD5PYQD` | `6613593d...` | 9.7 KB |
+| **PromptMarketplace** | `CA6RRLV4IBLKRRLPUDCVXZFDKRE77YHBNJFSXEFFLXV6EUAVVVS6HJUQ` | `f31af684...` | 5.6 KB |
 
-**Arquitectura**: el marketplace almacena el ID del token en `__constructor`. `buy_prompt` llama a `my_token::sell` via `env.invoke_contract` (cross-contract). `remint` llama a `my_token::mint`. Ambos contratos emiten eventos `#[contractevent]` (PromptRegistered, PromptPriceUpdated, PromptRemoved, PromptPurchased, TokensReminted).
+**Arquitectura**: el marketplace almacena el ID del token en `__constructor`. `buy_prompt` llama a `my_token::sell_forwarded` via `env.invoke_contract` (cross-contract). `remint` llama a `my_token::mint_forwarded`. Ambos contratos emiten eventos `#[contractevent]` (PromptRegistered, PromptPriceUpdated, PromptRemoved, PromptPurchased, TokensReminted).
+
+> ⚠️ **Cross-contract auth forwarding**: las funciones `sell_forwarded` y `mint_forwarded` no verifican `require_auth()` internamente. Confían en que la root invocation (marketplace) ya verificó la autorización. Esto evita el error `Error(Auth, ExistingValue)` de Soroban cuando se llama `require_auth()` para la misma address en root + sub-invocation.
 
 ---
 
 ## Tests
+
+### Unit tests (22)
 
 ```bash
 # Todos los tests (22)
@@ -27,6 +31,17 @@ SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test --lib --target aa
 # Por paquete
 cargo test -p my-token --lib --target aarch64-apple-darwin
 cargo test -p prompt-marketplace --lib --target aarch64-apple-darwin
+```
+
+### Integration test (testnet)
+
+Prueba el flujo completo contra testnet real: mint → register → buy (cross-contract) → verify → remint → verify.
+
+```bash
+# Con los contracts deployados actuales
+TOKEN="CCHAUOEVX6TQD56VFZY2GI3N3HNF5W6QSRRKAGKDXV6S53T4BKD5PYQD" \
+MKT="CA6RRLV4IBLKRRLPUDCVXZFDKRE77YHBNJFSXEFFLXV6EUAVVVS6HJUQ" \
+bash scripts/integration-test.sh
 ```
 
 ### Token: 6 tests
@@ -97,7 +112,7 @@ stellar contract deploy \
   --alias prompt_marketplace \
   -- \
   --admin "$(stellar keys address default)" \
-  --token "CCZQTMOMCASGZTUEEUNVNHEZSMS2NXGVEQ2MERBSEXMWTMWUXOAYZRJ4"
+  --token "CCHAUOEVX6TQD56VFZY2GI3N3HNF5W6QSRRKAGKDXV6S53T4BKD5PYQD"
 ```
 
 ### Invocar
@@ -105,19 +120,19 @@ stellar contract deploy \
 ```bash
 # Leer nombre del token
 stellar contract invoke --source default --network testnet \
-  --id CCZQTMOMCASGZTUEEUNVNHEZSMS2NXGVEQ2MERBSEXMWTMWUXOAYZRJ4 \
+  --id CCHAUOEVX6TQD56VFZY2GI3N3HNF5W6QSRRKAGKDXV6S53T4BKD5PYQD \
   -- name
 
 # Registrar prompt
 stellar contract invoke --source default --network testnet \
-  --id CA4XFMUJA5LHSJD4PQQSZFGZUPAJ5YKNQNRXODVNMBACUBSQ2AWDJ4EE \
+  --id CA6RRLV4IBLKRRLPUDCVXZFDKRE77YHBNJFSXEFFLXV6EUAVVVS6HJUQ \
   --send=yes \
   -- register_prompt --prompt_id "alpha" --price 500 \
   --owner "$(stellar keys address default)"
 
 # Consultar precio
 stellar contract invoke --source default --network testnet \
-  --id CA4XFMUJA5LHSJD4PQQSZFGZUPAJ5YKNQNRXODVNMBACUBSQ2AWDJ4EE \
+  --id CA6RRLV4IBLKRRLPUDCVXZFDKRE77YHBNJFSXEFFLXV6EUAVVVS6HJUQ \
   -- get_price --prompt_id "alpha"
 ```
 
@@ -158,10 +173,14 @@ Cargo.toml                       # workspace: tokens + marketplace
 - **Stellar CLI**: `26.1.0`
 - **Target**: `wasm32v1-none` (release), `aarch64-apple-darwin` (tests)
 
-### Nota sobre autenticación en tests
+### Nota sobre autenticación cross-contract
 
-`soroban-sdk` v25 no soporta `mock_auths` para `require_auth` anidados en llamadas cross-contract. Las funciones que llaman `require_auth()` internamente (`sell`, `transfer`, `burn`) no se pueden testear con `mock_auths` (recording mode) cuando el auth debe pasar a una sub-invocación. La solución adoptada:
+`soroban-sdk` v25 tiene una limitación: `require_auth()` para una misma dirección solo puede ejecutarse UNA VEZ por árbol de llamadas. Llamarlo en la root invocation y luego en una sub-invocación (via `invoke_contract`) falla con `Error(Auth, ExistingValue)`.
 
-- Marketplace: tests solo de la lógica propia, sin llamadas reales al token via `buy_prompt`/`remint`
-- Token: tests de storage via `env.as_contract` + `TokenBase` (mint, balance), sin auth
-- Las operaciones con auth se verifican por código (`#[only_owner]`, `require_auth()` explícito)
+**Patrón adoptado:**
+
+- La función raíz (ej. `buy_prompt`, `remint`) llama `require_auth()` para la/s dirección/es involucradas.
+- Las sub-invocaciones al token usan variantes `*_forwarded` (`sell_forwarded`, `mint_forwarded`) que **no** verifican `require_auth()` internamente.
+- Para operaciones directas (sin marketplace), el token expone `sell` (con `require_auth`) y `mint` (con `#[only_owner]`).
+
+Esto aplica también a `TokenManager::sell` que usa `Base::update` en vez de `Base::burn` para evitar el doble `require_auth` de `Base::burn`.

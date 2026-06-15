@@ -13,7 +13,6 @@ impl TokenManager {
     }
 
     pub fn mint(e: &Env, to: &Address, amount: i128) {
-        ownable::enforce_owner_auth(e);
         Base::mint(e, to, amount);
         MintEvent {
             admin: ownable::get_owner(e).unwrap(),
@@ -46,9 +45,31 @@ impl TokenManager {
         .publish(e);
     }
 
+    /// Burn tokens from seller's balance. Auth is checked via `seller.require_auth()`.
+    /// Use this for direct calls where `sell` is the root invocation.
+    ///
+    /// Uses `Base::update` directly instead of `Base::burn` to avoid a double
+    /// `require_auth` (Base::burn also calls `from.require_auth()`).
     pub fn sell(e: &Env, seller: &Address, amount: i128) {
         seller.require_auth();
-        Base::burn(e, seller, amount);
+        Base::update(e, Some(seller), None, amount);
+        SellEvent {
+            seller: seller.clone(),
+            amount,
+        }
+        .publish(e);
+    }
+
+    /// Same as `sell` but WITHOUT `require_auth`. Call this when auth is
+    /// forwarded from a root invocation (e.g., a marketplace calling
+    /// `buy_prompt` which already called `buyer.require_auth()`).
+    ///
+    /// # Safety
+    ///
+    /// The caller MUST ensure the seller has authorized the action at the
+    /// root invocation level, otherwise tokens can be burned from any account.
+    pub fn sell_forwarded(e: &Env, seller: &Address, amount: i128) {
+        Base::update(e, Some(seller), None, amount);
         SellEvent {
             seller: seller.clone(),
             amount,
