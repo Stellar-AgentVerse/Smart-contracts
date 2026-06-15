@@ -88,7 +88,7 @@ impl FungibleToken for MyToken {
 impl FungibleBurnable for MyToken {
     #[when_not_paused]
     fn burn(e: &Env, from: Address, amount: i128) {
-        Base::burn(e, &from, amount);
+        TokenManager::burn(e, &from, amount);
     }
 
     #[when_not_paused]

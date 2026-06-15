@@ -21,7 +21,6 @@ pub struct TransferEvent {
 }
 
 #[contractevent(data_format = "single-value", topics = ["burn"])]
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BurnEvent {
     #[topic]
