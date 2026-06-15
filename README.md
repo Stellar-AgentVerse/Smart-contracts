@@ -11,10 +11,10 @@ Dos contratos Soroban desplegados en **Testnet**, conectados entre sí:
 
 | Contrato | ID | Wasm Hash | Tamaño |
 |---|---|---|---|
-| **MyToken** | `CCZQTMOMCASGZTUEEUNVNHEZSMS2NXGVEQ2MERBSEXMWTMWUXOAYZRJ4` | `a724013b...` | 9.7 KB |
-| **PromptMarketplace** | `CA4XFMUJA5LHSJD4PQQSZFGZUPAJ5YKNQNRXODVNMBACUBSQ2AWDJ4EE` | `86efb8bb...` | 5.6 KB |
+| **MyToken** | `CAMMA4Y4KYYEN7CC6RFQBL4VMX4OBNYMPI775BVP2QTXWK7PLHEC6F5Q` | `d9685a64...` | 9.7 KB |
+| **PromptMarketplace** | `CBF63JDZF4XWYOWJCI2ULBKTAGZAH2X6S5KX3AL4RFHDCIRVUESKMKA7` | `f31af684...` | 5.6 KB |
 
-**Arquitectura**: el marketplace almacena el ID del token en `__constructor`. `buy_prompt` llama a `my_token::sell` via `env.invoke_contract` (cross-contract). `remint` llama a `my_token::mint`.
+**Arquitectura**: el marketplace almacena el ID del token en `__constructor`. `buy_prompt` llama a `my_token::sell` via `env.invoke_contract` (cross-contract). `remint` llama a `my_token::mint`. Ambos contratos emiten eventos `#[contractevent]` (PromptRegistered, PromptPriceUpdated, PromptRemoved, PromptPurchased, TokensReminted).
 
 ---
 
