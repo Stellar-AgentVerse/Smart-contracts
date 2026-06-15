@@ -7,6 +7,7 @@ use soroban_sdk::{contracttype, Address, String};
 pub struct Prompt {
     pub price: i128,
     pub owner: Address,
+    pub content_uri: String,
 }
 
 #[contracttype]

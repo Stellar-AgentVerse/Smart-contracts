@@ -44,10 +44,17 @@ impl PromptMarketplace {
     // ─── Admin: prompt management ────────────────────────────
 
     /// Register a new prompt for sale.
-    /// `prompt_id` – unique identifier for the prompt.
-    /// `price`     – how many tokens the buyer must burn to access it.
-    /// `owner`     – the user who created/provided the prompt content.
-    pub fn register_prompt(e: &Env, prompt_id: String, price: i128, owner: Address) {
+    /// `prompt_id`    – unique identifier for the prompt.
+    /// `price`        – how many tokens the buyer must burn to access it.
+    /// `owner`        – the user who created/provided the prompt content.
+    /// `content_uri`  – URI/IPFS hash pointing to the prompt content.
+    pub fn register_prompt(
+        e: &Env,
+        prompt_id: String,
+        price: i128,
+        owner: Address,
+        content_uri: String,
+    ) {
         Self::enforce_admin(e);
         assert!(price > 0, "price must be positive");
 
@@ -57,7 +64,11 @@ impl PromptMarketplace {
             "prompt already registered"
         );
 
-        let prompt = Prompt { price, owner };
+        let prompt = Prompt {
+            price,
+            owner,
+            content_uri,
+        };
         e.storage().instance().set(&key, &prompt);
     }
 
@@ -146,6 +157,17 @@ impl PromptMarketplace {
             .get(&key)
             .expect("prompt not found");
         prompt.price
+    }
+
+    /// Read the content URI for a prompt.
+    pub fn get_content_uri(e: &Env, prompt_id: String) -> String {
+        let key = DataKey::Prompt(prompt_id);
+        let prompt: Prompt = e
+            .storage()
+            .instance()
+            .get(&key)
+            .expect("prompt not found");
+        prompt.content_uri
     }
 
     /// Read the prompt owner (creator).
