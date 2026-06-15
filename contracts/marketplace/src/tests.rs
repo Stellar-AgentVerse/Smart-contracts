@@ -455,3 +455,10 @@ fn test_token_mint_and_balance() {
     });
     assert_eq!(bal, 1000);
 }
+
+// ─── Cross-contract auth note ─────────────────────────────
+// buy_prompt and remint involve cross-contract require_auth calls
+// (marketplace → token.sell / token.mint). Soroban v25 mock auth
+// cannot satisfy nested require_auth in sub-invocations — the
+// __check_auth returns Void but the host rejects with InvalidAction.
+// These flows are verified via deploy-and-invoke on testnet CLI only.
