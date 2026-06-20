@@ -1,6 +1,7 @@
 #![no_std]
 
 mod contract;
+pub mod privacy;
 mod storage {
     pub mod types;
 }

@@ -1,6 +1,7 @@
-use soroban_sdk::{contract, contractevent, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Symbol, Val, Vec};
+use soroban_sdk::{contract, contractevent, contractimpl, contracterror, vec, Address, Bytes, Env, IntoVal, String, Symbol, Val, Vec};
 
-use crate::storage::types::{DataKey, Prompt};
+use crate::privacy::Bytes32;
+use crate::storage::types::{DataKey, PolicyData, Prompt};
 
 /// Contract errors for prompt-marketplace operations.
 #[contracterror]
@@ -70,6 +71,34 @@ pub struct TokensReminted {
     #[topic]
     pub to: Address,
     pub amount: i128,
+}
+
+// ─── Privacy Events ────────────────────────────────────────
+
+/// Emitted when admin registers a new opaque policy commitment.
+/// Only the policy_id and commitment hash are exposed — never the content.
+#[contractevent(data_format = "map", topics = ["policy_registered"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyRegistered {
+    #[topic]
+    pub policy_id: u64,
+    pub commitment: Bytes32,
+}
+
+/// Emitted when an access leaf is issued into the Merkle accumulator.
+/// No buyer address or prompt identity is included.
+#[contractevent(data_format = "map", topics = ["access_issued"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessIssued {
+    pub leaf: Bytes32,
+    pub new_root: Bytes32,
+}
+
+/// Emitted when a nullifier is consumed (one-time access proof used).
+#[contractevent(data_format = "single-value", topics = ["nullifier_consumed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NullifierConsumed {
+    pub nullifier: Bytes32,
 }
 
 /// A Soroban contract that lets admins register prompts for sale,
@@ -303,5 +332,128 @@ impl PromptMarketplace {
             .get(&DataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+    }
+
+    // ─── AccessRegistry ──────────────────────────────────────
+
+    /// Register an opaque policy commitment. Only the hash and token price
+    /// are stored — content_uri and prompt identity never touch the ledger.
+    /// Returns a monotonically increasing policy_id.
+    pub fn register_policy(e: &Env, policy_commitment: Bytes32, price: i128) -> u64 {
+        Self::enforce_admin(e);
+        assert!(price > 0, "price must be positive");
+
+        let id: u64 = e
+            .storage()
+            .instance()
+            .get(&DataKey::PolicyCounter)
+            .unwrap_or(0u64);
+
+        let policy = PolicyData {
+            commitment: policy_commitment.clone(),
+            price,
+        };
+        e.storage().instance().set(&DataKey::Policy(id), &policy);
+        e.storage()
+            .instance()
+            .set(&DataKey::PolicyCounter, &(id + 1));
+
+        PolicyRegistered {
+            policy_id: id,
+            commitment: policy_commitment,
+        }
+        .publish(e);
+
+        id
+    }
+
+    /// Issue an opaque access leaf without recording buyer identity or
+    /// prompt_id in storage. Updates the Merkle accumulator root and
+    /// returns the leaf for the caller to retain as their access proof.
+    ///
+    /// Admin-gated: payment verification happens off-chain (or via a
+    /// separate token-burn step) before the admin calls this function.
+    pub fn issue_access(e: &Env, policy_id: u64, session_commitment: Bytes32) -> Bytes32 {
+        Self::enforce_admin(e);
+
+        let _: PolicyData = e
+            .storage()
+            .instance()
+            .get(&DataKey::Policy(policy_id))
+            .expect("policy not found");
+
+        let leaf = Self::compute_leaf(e, policy_id, &session_commitment);
+
+        let current_root: Bytes32 = e
+            .storage()
+            .instance()
+            .get(&DataKey::AccessRoot)
+            .unwrap_or_else(|| Self::genesis_root(e));
+
+        let new_root: Bytes32 = {
+            let mut buf = Bytes::new(e);
+            let root_bytes = Bytes::from_array(e, &current_root.to_array());
+            buf.append(&root_bytes);
+            let leaf_bytes = Bytes::from_array(e, &leaf.to_array());
+            buf.append(&leaf_bytes);
+            e.crypto().sha256(&buf).into()
+        };
+        e.storage()
+            .instance()
+            .set(&DataKey::AccessRoot, &new_root);
+
+        AccessIssued {
+            leaf: leaf.clone(),
+            new_root,
+        }
+        .publish(e);
+
+        leaf
+    }
+
+    /// Return the current Merkle accumulator root over all issued access leaves.
+    pub fn root(e: &Env) -> Bytes32 {
+        e.storage()
+            .instance()
+            .get(&DataKey::AccessRoot)
+            .unwrap_or_else(|| Self::genesis_root(e))
+    }
+
+    // ─── AccessNullifiers ─────────────────────────────────────
+
+    /// Consume a nullifier, permanently preventing its reuse.
+    /// Panics if the nullifier has already been consumed.
+    pub fn consume(e: &Env, nullifier: Bytes32) {
+        let key = DataKey::Nullifier(nullifier.clone());
+        let already: bool = e.storage().instance().get(&key).unwrap_or(false);
+        assert!(!already, "nullifier already used");
+        e.storage().instance().set(&key, &true);
+
+        NullifierConsumed { nullifier }.publish(e);
+    }
+
+    /// Check whether a nullifier has been consumed.
+    pub fn used(e: &Env, nullifier: Bytes32) -> bool {
+        e.storage()
+            .instance()
+            .get(&DataKey::Nullifier(nullifier))
+            .unwrap_or(false)
+    }
+
+    // ─── Internal: privacy helpers ────────────────────────────
+
+    /// leaf = SHA256(policy_id_be_bytes || session_commitment)
+    fn compute_leaf(e: &Env, policy_id: u64, session_commitment: &Bytes32) -> Bytes32 {
+        let mut buf = Bytes::new(e);
+        buf.append(&Bytes::from_array(e, &policy_id.to_be_bytes()));
+        buf.append(&Bytes::from_array(e, &session_commitment.to_array()));
+        e.crypto().sha256(&buf).into()
+    }
+
+    /// Deterministic initial root so `root()` is stable before any access is issued.
+    fn genesis_root(e: &Env) -> Bytes32 {
+        e.crypto()
+            .sha256(&Bytes::from_array(e, b"access_genesis"))
+            .into()
     }
 }
