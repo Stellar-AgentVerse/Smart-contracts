@@ -1,10 +1,10 @@
 #![cfg(all(test, not(target_family = "wasm")))]
 
-use crate::contract::{PromptMarketplace, PromptMarketplaceClient};
+use crate::contract::{PromptMarketplace, PromptMarketplaceClient, PromptPurchased, TokensReminted};
 use my_token::MyToken;
 use soroban_sdk::{
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
-    Address, Env, IntoVal, String,
+    testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke},
+    Address, Env, Event, IntoVal, String,
 };
 use stellar_tokens::fungible::Base as TokenBase;
 
@@ -457,8 +457,205 @@ fn test_token_mint_and_balance() {
 }
 
 // ─── Cross-contract auth note ─────────────────────────────
-// buy_prompt and remint involve cross-contract require_auth calls
-// (marketplace → token.sell / token.mint). Soroban v25 mock auth
-// cannot satisfy nested require_auth in sub-invocations — the
-// __check_auth returns Void but the host rejects with InvalidAction.
-// These flows are verified via deploy-and-invoke on testnet CLI only.
+//
+// Soroban v25's mock auth cannot satisfy a SECOND require_auth() for the
+// SAME address within one call tree: if a root invocation calls
+// `buyer.require_auth()` and then a sub-invocation (e.g. marketplace →
+// token via `invoke_contract`) also calls `require_auth()` for `buyer`,
+// the host rejects it with `Error(Auth, ExistingValue)` — mock auth has
+// no way to represent "this address already authorized higher up."
+//
+// This codebase avoids that limitation by design: `sell_forwarded` and
+// `mint_forwarded` (contracts/tokens/src/contract.rs) do NOT call
+// `require_auth()` at all — they trust that the root invocation
+// (`buy_prompt` / `remint`) already authorized the relevant address. As a
+// result, the tests below CAN mock_auths() the single root-level
+// require_auth() and exercise the real cross-contract call
+// (marketplace → token via `invoke_contract`) end-to-end, including
+// balance changes and event emission. No `sub_invokes` entries are
+// needed because no nested require_auth() happens on the token side.
+//
+// The risk this still carries: `sell_forwarded` / `mint_forwarded` skip
+// auth entirely, so anyone who could call them directly (bypassing the
+// marketplace) could mint or burn arbitrary balances. That trust boundary
+// is exercised explicitly in `contracts/tokens/src/tests.rs`
+// (`test_sell_forwarded_updates_balance`, `test_mint_forwarded_mints_tokens`),
+// which invoke them directly with NO mock_auths() at all to prove they
+// truly require no authorization — i.e. to prove the danger the SDD
+// warns about, not just the happy path.
+//
+// `scripts/integration-test.sh` additionally exercises the same flow
+// end-to-end against real testnet auth (Soroban CLI signing), which is
+// the only place a genuine nested require_auth (if ever reintroduced)
+// would actually be caught.
+
+#[test]
+fn test_buy_prompt_cross_contract() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let pid = String::from_str(&env, "cross-contract");
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 500i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &500, &creator, &uri);
+
+    // Real cross-contract call: marketplace.buy_prompt() → invoke_contract
+    // → token.sell_forwarded(). Only the root require_auth (buyer, on
+    // buy_prompt) needs mocking — sell_forwarded forwards that auth rather
+    // than re-checking it.
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+
+    let bal: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
+    assert_eq!(bal, 500, "buyer's tokens must be burned via sell_forwarded");
+}
+
+#[test]
+fn test_has_access_after_buy() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let pid = String::from_str(&env, "access-flow");
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 200i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &200, &creator, &uri);
+
+    assert!(!mkt.has_access(&buyer, &pid), "no access before purchase");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+
+    assert!(mkt.has_access(&buyer, &pid), "access granted after purchase");
+}
+
+#[test]
+fn test_buy_prompt_emits_event() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let pid = String::from_str(&env, "event-flow");
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 300i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &300, &creator, &uri);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+
+    // Read events immediately — the next contract invocation resets the
+    // recorded buffer. `sell_forwarded` also publishes its own SellEvent
+    // on the token contract, so check for PromptPurchased specifically
+    // rather than asserting on the full event list.
+    let expected = PromptPurchased {
+        buyer: buyer.clone(),
+        prompt_id: pid.clone(),
+        price: 300,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected.to_xdr(&env, &mkt_id)));
+}
+
+#[test]
+fn test_remint_cross_contract() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, buyer, .. } = setup_env();
+
+    // Real cross-contract call: marketplace.remint() → invoke_contract →
+    // token.mint_forwarded(). Only the root require_auth (admin, on
+    // remint) needs mocking.
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "remint",
+            args: (&buyer, 2000i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .remint(&buyer, &2000);
+
+    let bal: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
+    assert_eq!(bal, 2000, "tokens must be minted via mint_forwarded");
+}
+
+#[test]
+fn test_remint_emits_event() {
+    let Ctx { env, mkt, mkt_id, admin, buyer, .. } = setup_env();
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "remint",
+            args: (&buyer, 1000i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .remint(&buyer, &1000);
+
+    let expected = TokensReminted {
+        admin: admin.clone(),
+        to: buyer.clone(),
+        amount: 1000,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected.to_xdr(&env, &mkt_id)));
+}

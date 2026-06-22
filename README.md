@@ -22,16 +22,28 @@ Dos contratos Soroban desplegados en **Testnet**, conectados entre sí:
 
 ## Tests
 
-### Unit tests (22)
+### Unit tests (29)
 
 ```bash
-# Todos los tests (22)
-SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test --lib --target aarch64-apple-darwin
+# Todos los tests (29)
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test --workspace --target aarch64-apple-darwin
 
 # Por paquete
-cargo test -p my-token --lib --target aarch64-apple-darwin
-cargo test -p prompt-marketplace --lib --target aarch64-apple-darwin
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test -p my-token --target aarch64-apple-darwin
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test -p prompt-marketplace --target aarch64-apple-darwin
 ```
+
+> En Linux/CI usa `--target x86_64-unknown-linux-gnu` en vez de `aarch64-apple-darwin`. El target por defecto del workspace (`.cargo/config.toml`) es `wasm32v1-none`, que no soporta `cargo test` — siempre hay que pasar `--target` explícito para correr tests.
+
+### Brecha de mock auth en Soroban v25 (y cómo se mitiga)
+
+Soroban v25's mock auth no puede satisfacer un SEGUNDO `require_auth()` para la MISMA address dentro de un mismo árbol de invocación: si la invocación raíz llama `buyer.require_auth()` y luego una sub-invocación (marketplace → token vía `invoke_contract`) también llama `require_auth()` para `buyer`, el host rechaza con `Error(Auth, ExistingValue)` — mock auth no tiene forma de representar "esta address ya autorizó más arriba en el árbol".
+
+**Mitigación adoptada en este código:** `sell_forwarded` y `mint_forwarded` (`contracts/tokens/src/contract.rs`) NO llaman `require_auth()` — confían en que la invocación raíz (`buy_prompt` / `remint`) ya autorizó la address correspondiente. Como resultado, sí es posible escribir tests con `mock_auths()` que mockeen solo el único `require_auth()` de la raíz y ejerzan la llamada cross-contract real de punta a punta (balances, eventos incluidos) — ver `test_buy_prompt_cross_contract`, `test_remint_cross_contract`, `test_buy_prompt_emits_event`, `test_has_access_after_buy` en `contracts/marketplace/src/tests.rs`. No se necesitan `sub_invokes` porque no hay un `require_auth()` anidado del lado del token.
+
+**El riesgo que esto sigue implicando:** `sell_forwarded` / `mint_forwarded` no verifican autorización en absoluto — si algo pudiera invocarlos directamente (sin pasar por el marketplace), podría mintear o quemar balances arbitrarios. Ese límite de confianza se ejercita explícitamente, SIN ningún `mock_auths()`, en `contracts/tokens/src/tests.rs` (`test_sell_forwarded_updates_balance`, `test_mint_forwarded_mints_tokens`) — para probar que esas funciones realmente no requieren autorización, no solo el happy path.
+
+`scripts/integration-test.sh` ejercita el mismo flujo de punta a punta contra testnet real con firmas genuinas (Soroban CLI), que es el único lugar donde un `require_auth()` anidado genuino (si se reintrodujera por error) sería detectado.
 
 ### Integration test (testnet)
 
@@ -44,7 +56,7 @@ MKT="CA6RRLV4IBLKRRLPUDCVXZFDKRE77YHBNJFSXEFFLXV6EUAVVVS6HJUQ" \
 bash scripts/integration-test.sh
 ```
 
-### Token: 6 tests
+### Token: 8 tests
 
 | Test | Qué cubre |
 |---|---|
@@ -54,8 +66,10 @@ bash scripts/integration-test.sh
 | `test_mint_to_different_users` | Mint a múltiples usuarios, supply tracking |
 | `test_mint_overflow_panics` | i128::MAX + 1 debe panic |
 | `test_zero_balance_default` | Balance por defecto es 0 |
+| `test_sell_forwarded_updates_balance` | `sell_forwarded` quema tokens y emite `SellEvent`, invocado SIN `mock_auths()` |
+| `test_mint_forwarded_mints_tokens` | `mint_forwarded` mintea tokens y emite `MintEvent`, invocado SIN `mock_auths()` |
 
-### Marketplace: 16 tests
+### Marketplace: 21 tests
 
 | Test | Qué cubre |
 |---|---|
@@ -75,6 +89,11 @@ bash scripts/integration-test.sh
 | `test_register_after_remove` | Re-registrar mismo ID post-eliminación |
 | `test_has_access_unregistered` | has_access sin compra devuelve false |
 | `test_token_mint_and_balance` | Mint vía storage en contexto del token |
+| `test_buy_prompt_cross_contract` | E2E: register → buy_prompt (cross-contract real vía `invoke_contract`) → balance quemado |
+| `test_has_access_after_buy` | has_access es false antes de comprar y true después de `buy_prompt` |
+| `test_buy_prompt_emits_event` | `buy_prompt` emite `PromptPurchased` con buyer/prompt_id/price correctos |
+| `test_remint_cross_contract` | E2E: `remint` (cross-contract real vía `invoke_contract`) → balance minteado |
+| `test_remint_emits_event` | `remint` emite `TokensReminted` con admin/to/amount correctos |
 
 ---
 
@@ -152,7 +171,7 @@ contracts/
 │       │   └── token.rs         # TokenManager — lógica de negocio
 │       ├── storage/
 │       │   └── types.rs         # DataKey, contracttype structs
-│       └── tests.rs             # 6 tests
+│       └── tests.rs             # 8 tests
 └── marketplace/                 # PromptMarketplace
     ├── Cargo.toml
     └── src/
@@ -160,7 +179,7 @@ contracts/
         ├── contract.rs          # #[contract] PromptMarketplace — API pública
         ├── storage/
         │   └── types.rs         # DataKey, Prompt struct, errors
-        └── tests.rs             # 16 tests
+        └── tests.rs             # 21 tests
 Cargo.toml                       # workspace: tokens + marketplace
 ```
 
@@ -184,3 +203,5 @@ Cargo.toml                       # workspace: tokens + marketplace
 - Para operaciones directas (sin marketplace), el token expone `sell` (con `require_auth`) y `mint` (con `#[only_owner]`).
 
 Esto aplica también a `TokenManager::sell` que usa `Base::update` en vez de `Base::burn` para evitar el doble `require_auth` de `Base::burn`.
+
+Ver [Brecha de mock auth en Soroban v25](#brecha-de-mock-auth-en-soroban-v25-y-cómo-se-mitiga) para cómo este patrón se prueba (y se vigila como riesgo de seguridad) en los tests.
