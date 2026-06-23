@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "contracts/tokens",
   "contracts/marketplace",
+  "crates/access-prover",
 ]
 
 [workspace.dependencies]
