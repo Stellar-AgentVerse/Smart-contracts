@@ -35,17 +35,20 @@ jobs:
   test:
     name: Test, lint, format, and audit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Soroban
-        uses: stellar/actions/setup-soroban@v1
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v27.0.0
 
       - name: Install Rust components
         run: rustup component add clippy rustfmt
+
+      - name: Install Soroban WASM target
+        run: rustup target add wasm32v1-none
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -54,13 +57,13 @@ jobs:
         uses: taiki-e/install-action@cargo-audit
 
       - name: Run tests
-        run: cargo test --workspace --target x86_64-unknown-linux-gnu
+        run: make test HOST_TARGET=x86_64-unknown-linux-gnu
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
+        run: make clippy HOST_TARGET=x86_64-unknown-linux-gnu
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: make fmt-check
 
       - name: Audit dependencies
         run: cargo audit
