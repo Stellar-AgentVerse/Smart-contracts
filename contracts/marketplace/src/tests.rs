@@ -302,6 +302,23 @@ fn test_non_admin_cannot_remove() {
     .remove_prompt(&pid);
 }
 
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_non_admin_cannot_remint() {
+    let Ctx { env, mkt, mkt_id, buyer, .. } = setup_env();
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "remint",
+            args: (&buyer, 100i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .remint(&buyer, &100);
+}
+
 // ─── Adversarial: edge values and state transitions ────
 
 #[test]
@@ -526,6 +543,101 @@ fn test_buy_prompt_cross_contract() {
 
     let bal: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
     assert_eq!(bal, 500, "buyer's tokens must be burned via sell_forwarded");
+}
+
+#[test]
+#[should_panic(expected = "prompt not found")]
+fn test_buy_prompt_unregistered_panics() {
+    let Ctx { env, mkt, mkt_id, buyer, .. } = setup_env();
+    let pid = String::from_str(&env, "missing-prompt");
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #100)")]
+fn test_buy_prompt_insufficient_balance_panics() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let pid = String::from_str(&env, "expensive-prompt");
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 100);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 500i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &500, &creator, &uri);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+}
+
+#[test]
+#[should_panic(expected = "already purchased")]
+fn test_buy_prompt_same_prompt_twice_panics() {
+    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let pid = String::from_str(&env, "one-time-prompt");
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&pid, 250i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&pid, &250, &creator, &uri);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &pid).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &pid);
 }
 
 #[test]

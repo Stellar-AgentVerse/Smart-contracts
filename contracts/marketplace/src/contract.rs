@@ -179,8 +179,7 @@ impl PromptMarketplace {
     /// Buy a prompt. The buyer authenticates, their tokens are burned
     /// via `MyToken::sell_forwarded`, and the buyer gains access to the prompt.
     ///
-    /// This is idempotent in storage — buying again is a no-op
-    /// (tokens are burned each time though, so the caller pays again).
+    /// A buyer can only buy each prompt once.
     pub fn buy_prompt(e: &Env, buyer: Address, prompt_id: String) {
         buyer.require_auth();
 
@@ -190,6 +189,12 @@ impl PromptMarketplace {
             .instance()
             .get(&key)
             .expect("prompt not found");
+
+        let purchase_key = DataKey::Purchase(buyer.clone(), prompt_id.clone());
+        assert!(
+            !e.storage().instance().get(&purchase_key).unwrap_or(false),
+            "already purchased"
+        );
 
         // Burn tokens from the buyer via `sell_forwarded` — this function
         // trusts the root invocation's auth (buyer.require_auth() above)
@@ -201,7 +206,6 @@ impl PromptMarketplace {
         let _: () = e.invoke_contract(&token, &sell_sym, sell_args);
 
         // Mark the purchase so has_access returns true.
-        let purchase_key = DataKey::Purchase(buyer.clone(), prompt_id.clone());
         e.storage().instance().set(&purchase_key, &true);
 
         PromptPurchased {
