@@ -1,0 +1,66 @@
+name: Smart Contracts CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/smart-contracts-ci.yml"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "contracts/**"
+      - "scripts/**"
+      - "Makefile"
+      - "README.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/smart-contracts-ci.yml"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "contracts/**"
+      - "scripts/**"
+      - "Makefile"
+      - "README.md"
+
+env:
+  CARGO_TERM_COLOR: always
+  SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2: "1"
+
+jobs:
+  test:
+    name: Test, lint, format, and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Soroban
+        uses: stellar/actions/setup-soroban@v1
+
+      - name: Install Rust components
+        run: rustup component add clippy rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Run tests
+        run: cargo test --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Audit dependencies
+        run: cargo audit

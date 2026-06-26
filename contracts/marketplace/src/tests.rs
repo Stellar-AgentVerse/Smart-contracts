@@ -1,6 +1,8 @@
 #![cfg(all(test, not(target_family = "wasm")))]
 
-use crate::contract::{PromptMarketplace, PromptMarketplaceClient, PromptPurchased, TokensReminted};
+use crate::contract::{
+    PromptMarketplace, PromptMarketplaceClient, PromptPurchased, TokensReminted,
+};
 use my_token::MyToken;
 use soroban_sdk::{
     testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke},
@@ -58,7 +60,15 @@ fn setup_env() -> Ctx {
 
 #[test]
 fn test_register_and_query_prompt() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "alpha");
 
     mkt.mock_auths(&[MockAuth {
@@ -80,7 +90,15 @@ fn test_register_and_query_prompt() {
 #[test]
 #[should_panic(expected = "prompt already registered")]
 fn test_duplicate_registration_panics() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "dup");
 
     mkt.mock_auths(&[MockAuth {
@@ -108,7 +126,15 @@ fn test_duplicate_registration_panics() {
 
 #[test]
 fn test_update_price() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "dynamic");
 
     mkt.mock_auths(&[MockAuth {
@@ -140,7 +166,15 @@ fn test_update_price() {
 
 #[test]
 fn test_remove_prompt() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "temp");
 
     mkt.mock_auths(&[MockAuth {
@@ -181,7 +215,16 @@ fn test_remove_prompt() {
 
 #[test]
 fn test_multiple_prompts_independent() {
-    let Ctx { env, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid_a = String::from_str(&env, "a");
     let pid_b = String::from_str(&env, "b");
 
@@ -225,7 +268,15 @@ fn test_get_price_unregistered_panics() {
 #[test]
 #[should_panic(expected = "Unauthorized")]
 fn test_non_admin_cannot_register() {
-    let Ctx { env, mkt, mkt_id, buyer, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        buyer,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "hack");
 
     mkt.mock_auths(&[MockAuth {
@@ -243,7 +294,16 @@ fn test_non_admin_cannot_register() {
 #[test]
 #[should_panic(expected = "Unauthorized")]
 fn test_non_admin_cannot_update_price() {
-    let Ctx { env, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "guarded");
 
     // Admin registers
@@ -274,7 +334,16 @@ fn test_non_admin_cannot_update_price() {
 #[test]
 #[should_panic(expected = "Unauthorized")]
 fn test_non_admin_cannot_remove() {
-    let Ctx { env, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "protected");
 
     // Admin registers
@@ -307,7 +376,15 @@ fn test_non_admin_cannot_remove() {
 #[test]
 #[should_panic(expected = "price must be positive")]
 fn test_register_zero_price_panics() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "free");
 
     mkt.mock_auths(&[MockAuth {
@@ -325,7 +402,15 @@ fn test_register_zero_price_panics() {
 #[test]
 #[should_panic(expected = "price must be positive")]
 fn test_update_price_zero_panics() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "discount");
 
     mkt.mock_auths(&[MockAuth {
@@ -353,7 +438,15 @@ fn test_update_price_zero_panics() {
 
 #[test]
 fn test_register_max_price() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "max");
     let max_price = i128::MAX;
 
@@ -374,7 +467,13 @@ fn test_register_max_price() {
 #[test]
 #[should_panic(expected = "prompt not found")]
 fn test_update_unregistered_prompt_panics() {
-    let Ctx { env, mkt, mkt_id, admin, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "phantom");
 
     mkt.mock_auths(&[MockAuth {
@@ -391,7 +490,15 @@ fn test_update_unregistered_prompt_panics() {
 
 #[test]
 fn test_register_after_remove() {
-    let Ctx { env, mkt, mkt_id, admin, creator, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "reborn");
 
     // Register
@@ -435,7 +542,9 @@ fn test_register_after_remove() {
 
 #[test]
 fn test_has_access_unregistered() {
-    let Ctx { env, mkt, buyer, .. } = setup_env();
+    let Ctx {
+        env, mkt, buyer, ..
+    } = setup_env();
     let pid = String::from_str(&env, "unknown");
     assert!(!mkt.has_access(&buyer, &pid));
 }
@@ -444,15 +553,18 @@ fn test_has_access_unregistered() {
 
 #[test]
 fn test_token_mint_and_balance() {
-    let Ctx { env, token_id, buyer, .. } = setup_env();
+    let Ctx {
+        env,
+        token_id,
+        buyer,
+        ..
+    } = setup_env();
 
     env.as_contract(&token_id, || {
         TokenBase::mint(&env, &buyer, 1000);
     });
 
-    let bal: i128 = env.as_contract(&token_id, || {
-        TokenBase::balance(&env, &buyer)
-    });
+    let bal: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
     assert_eq!(bal, 1000);
 }
 
@@ -491,7 +603,17 @@ fn test_token_mint_and_balance() {
 
 #[test]
 fn test_buy_prompt_cross_contract() {
-    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "cross-contract");
 
     env.as_contract(&token_id, || {
@@ -530,7 +652,17 @@ fn test_buy_prompt_cross_contract() {
 
 #[test]
 fn test_has_access_after_buy() {
-    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "access-flow");
 
     env.as_contract(&token_id, || {
@@ -561,12 +693,25 @@ fn test_has_access_after_buy() {
     }])
     .buy_prompt(&buyer, &pid);
 
-    assert!(mkt.has_access(&buyer, &pid), "access granted after purchase");
+    assert!(
+        mkt.has_access(&buyer, &pid),
+        "access granted after purchase"
+    );
 }
 
 #[test]
 fn test_buy_prompt_emits_event() {
-    let Ctx { env, token_id, mkt, mkt_id, admin, creator, buyer, uri, .. } = setup_env();
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
     let pid = String::from_str(&env, "event-flow");
 
     env.as_contract(&token_id, || {
@@ -613,7 +758,15 @@ fn test_buy_prompt_emits_event() {
 
 #[test]
 fn test_remint_cross_contract() {
-    let Ctx { env, token_id, mkt, mkt_id, admin, buyer, .. } = setup_env();
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        buyer,
+        ..
+    } = setup_env();
 
     // Real cross-contract call: marketplace.remint() → invoke_contract →
     // token.mint_forwarded(). Only the root require_auth (admin, on
@@ -635,7 +788,14 @@ fn test_remint_cross_contract() {
 
 #[test]
 fn test_remint_emits_event() {
-    let Ctx { env, mkt, mkt_id, admin, buyer, .. } = setup_env();
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        buyer,
+        ..
+    } = setup_env();
 
     mkt.mock_auths(&[MockAuth {
         address: &admin,

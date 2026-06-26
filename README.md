@@ -1,5 +1,7 @@
 # Soroban Smart Contracts — AgentVerseStellar
 
+[![Smart Contracts CI](https://github.com/Stellar-AgentVerse/Smart-contracts/actions/workflows/smart-contracts-ci.yml/badge.svg)](https://github.com/Stellar-AgentVerse/Smart-contracts/actions/workflows/smart-contracts-ci.yml)
+
 Dos contratos Soroban desplegados en **Testnet**, conectados entre sí:
 
 - **MyToken** (`my-token`): token fungible SEP-0041 con mint gobernado por owner, sell con burn, pausable.
