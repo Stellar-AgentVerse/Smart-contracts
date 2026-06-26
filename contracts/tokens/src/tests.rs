@@ -1,7 +1,10 @@
 #![cfg(test)]
+extern crate std;
 
-use crate::MyToken;
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use crate::events::{MintEvent, SellEvent};
+use crate::{MyToken, MyTokenClient};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Env, Event, String};
+use stellar_access::ownable;
 use stellar_tokens::fungible::Base as TokenBase;
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -126,4 +129,83 @@ fn test_zero_balance_default() {
 
     let bal: i128 = env.as_contract(&contract_id, || TokenBase::balance(&env, &nobody));
     assert_eq!(bal, 0);
+}
+
+// ─── `*_forwarded` cross-contract trust boundary ───────────
+//
+// `sell_forwarded` and `mint_forwarded` deliberately skip `require_auth()`
+// so the marketplace can call them after it already authorized the root
+// invocation (see `contracts/marketplace/src/contract.rs::buy_prompt` /
+// `remint`). That means these two functions are the highest-risk surface
+// in the whole workspace: any caller, not just the marketplace, can invoke
+// them directly with NO authorization check on `seller`/`to` whatsoever.
+//
+// These tests invoke them directly via the public client with no
+// `mock_auths()` set up at all, proving (a) the burn/mint logic behaves
+// correctly and (b) the functions truly require no auth to execute —
+// which is exactly the property that makes them dangerous outside the
+// marketplace's controlled call path.
+
+#[test]
+fn test_sell_forwarded_updates_balance() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        TokenBase::mint(&env, &user, 1000);
+    });
+
+    // No mock_auths() anywhere — sell_forwarded must succeed without
+    // the seller ever authorizing this call directly.
+    client.sell_forwarded(&user, &400);
+
+    // Events must be read before any further contract invocation — each
+    // top-level call resets the recorded event buffer. `Base::update`
+    // also publishes its own SEP-41 event, so check our custom `SellEvent`
+    // is present rather than asserting on the full (implementation-coupled)
+    // event list.
+    let expected = SellEvent {
+        seller: user.clone(),
+        amount: 400,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected.to_xdr(&env, &contract_id)));
+
+    assert_eq!(client.balance(&user), 600);
+    assert_eq!(client.total_supply(), 600);
+}
+
+#[test]
+fn test_mint_forwarded_mints_tokens() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+
+    // No mock_auths() anywhere — mint_forwarded must succeed without
+    // the contract owner authorizing this call directly.
+    client.mint_forwarded(&user, &750);
+
+    // Events must be read before any further contract invocation — each
+    // top-level call resets the recorded event buffer. `Base::mint`
+    // also publishes its own SEP-41 event, so check our custom `MintEvent`
+    // is present rather than asserting on the full (implementation-coupled)
+    // event list.
+    let expected = MintEvent {
+        admin: owner,
+        to: user.clone(),
+        amount: 750,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected.to_xdr(&env, &contract_id)));
+
+    assert_eq!(client.balance(&user), 750);
+    assert_eq!(client.total_supply(), 750);
 }
