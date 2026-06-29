@@ -1,0 +1,27 @@
+[package]
+name = "access-prover"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "access-prover"
+path = "cli/main.rs"
+
+[dependencies]
+ark-ff = "0.4.0"
+ark-ec = "0.4.0"
+ark-std = "0.4.0"
+ark-relations = "0.4.0"
+ark-r1cs-std = "0.4.0"
+ark-groth16 = "0.4.0"
+ark-crypto-primitives = { version = "0.4.0", features = ["r1cs"] }
+ark-bn254 = "0.4.0"
+rand = "0.8"
+rand_chacha = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", default-features = false, features = ["derive", "std", "help"] }
+thiserror = "1.0"
+hex = "0.4"
+ark-serialize = "0.4.0"
+ark-snark = "0.4.0"
