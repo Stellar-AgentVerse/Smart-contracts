@@ -104,7 +104,7 @@ SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 stellar contract build --pac
 SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 stellar contract build --package prompt-marketplace
 ```
 
-Requiere el target `wasm32v1-none` y la env var para Spec SHAKING v2.
+Requiere el target `wasm32v1-none` y la env var `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1` para Spec Shaking v2. Alternativamente, para mainnet se usa `cargo build --target wasm32v1-none --release` (ver sección Deploy en Mainnet).
 
 ---
 
@@ -133,6 +133,114 @@ stellar contract deploy \
   --admin "$(stellar keys address default)" \
   --token "CCHAUOEVX6TQD56VFZY2GI3N3HNF5W6QSRRKAGKDXV6S53T4BKD5PYQD"
 ```
+
+## Deploy en Mainnet
+
+> ⚠️ **ADVERTENCIA DE SEGURIDAD — LEER ANTES DE EJECUTAR**
+>
+> Mainnet implica valor real y transacciones irreversibles. Antes de deployar:
+>
+> 1. **No hardcodees ni hagas `source` de claves privadas.** Usa un secrets manager (1Password CLI, AWS Secrets Manager, HashiCorp Vault, GitHub encrypted secrets, etc.) para inyectar `MAINNET_DEPLOYER_SOURCE` y `MAINNET_ADMIN_SOURCE` en runtime.
+> 2. **Verifica el código y el WASM antes de deployar.** Recompila desde una fuente confiable, calcula el hash SHA-256 y comparalo con el artefacto que vas a subir.
+> 3. **Preferí cuentas multisig o hardware wallets** para la cuenta admin (`MAINNET_ADMIN_ADDR`). El deployer y el admin pueden ser distintas cuentas.
+> 4. **Revisa los parámetros de constructor.** Un error en `owner`/`admin` o en el `token` del marketplace puede dejar los contratos incontrolables.
+> 5. **Tené XLM suficiente** en la cuenta deployer para cubrir el rent/storage de ambos contratos en mainnet.
+
+### Prerrequisitos
+
+- Stellar CLI configurado para mainnet (`stellar network add mainnet ...` o variables de entorno equivalentes).
+- Acceso a un RPC endpoint de mainnet (Stellar public RPC, Blockdaemon, etc.).
+- Cuenta con XLM real para pagar fees y rent.
+- Cuenta admin separada (recomendado) con su par de claves seguras.
+- Target de compilación instalado: `rustup target add wasm32v1-none`.
+- Variable de entorno para Spec Shaking V2:
+  ```bash
+  export SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1
+  ```
+
+### Scripts de mainnet
+
+#### `scripts/deploy-mainnet.sh`
+
+Build release, calcula hashes, deploya, inicializa y valida ambos contratos. Emite un resumen JSON en `deploy-artifacts/`.
+
+```bash
+MAINNET_DEPLOYER_SOURCE="deployer" \
+MAINNET_ADMIN_SOURCE="admin" \
+MAINNET_ADMIN_ADDR="G..." \
+bash scripts/deploy-mainnet.sh
+```
+
+También podés usar el target de Makefile:
+
+```bash
+MAINNET_DEPLOYER_SOURCE="deployer" \
+MAINNET_ADMIN_SOURCE="admin" \
+MAINNET_ADMIN_ADDR="G..." \
+make deploy-mainnet
+```
+
+Variables opcionales:
+
+| Variable | Descripción | Default |
+|---|---|---|
+| `MAINNET_TOKEN_NAME` | Nombre del token | `AgentVerse Token` |
+| `MAINNET_TOKEN_SYMBOL` | Símbolo del token | `AVT` |
+| `MAINNET_TOKEN_DECIMALS` | Decimales | `7` |
+| `MAINNET_DEPLOY_OUT_DIR` | Carpeta de artefactos | `./deploy-artifacts` |
+
+El script:
+
+1. Construye ambos contratos con `cargo build --target wasm32v1-none --release`.
+2. Calcula el hash SHA-256 de cada WASM.
+3. Deploya `MyToken` y `PromptMarketplace` desde `MAINNET_DEPLOYER_SOURCE`.
+4. Inicializa el token con el admin, nombre, símbolo y decimales configurados.
+5. Inicializa el marketplace con el admin y el `contract_id` del token recién deployado.
+6. Valida post-deploy:
+   - Metadata del token (`name`, `symbol`, `decimals`).
+   - Supply inicial igual a `0`.
+   - Owner del token igual a `MAINNET_ADMIN_ADDR`.
+   - Admin del marketplace igual a `MAINNET_ADMIN_ADDR`.
+   - Token del marketplace igual al `contract_id` del token deployado.
+   - Hash WASM on-chain (fetcheado) coincide con el artefacto local.
+7. Escribe `deploy-artifacts/mainnet-deploy-summary-<timestamp>.json`.
+
+#### `scripts/verify-mainnet.sh`
+
+Verifica un par de contratos ya deployados sin re-deployar. Útil para CI o validaciones periódicas.
+
+```bash
+MAINNET_TOKEN_ID="C..." \
+MAINNET_MARKETPLACE_ID="C..." \
+MAINNET_ADMIN_ADDR="G..." \
+bash scripts/verify-mainnet.sh
+```
+
+O vía Makefile:
+
+```bash
+MAINNET_TOKEN_ID="C..." \
+MAINNET_MARKETPLACE_ID="C..." \
+MAINNET_ADMIN_ADDR="G..." \
+make verify-mainnet
+```
+
+Verifica:
+
+- Hash WASM on-chain vs. artefacto local.
+- Admin/owner de ambos contratos.
+- Link token ↔ marketplace.
+- Supply inicial (`0`).
+- Metadata del token.
+
+Escribe `deploy-artifacts/mainnet-verify-report-<timestamp>.json`.
+
+### Multisig / DAuthorization (roadmap v2)
+
+La v1 actual soporta cuentas multisig configuradas en Stellar CLI (el CLI pedirá/co-firmará las transacciones). Para una v2 se documentará como mejora:
+
+- Flujo de firmas separadas: el deployer crea la transacción, múltiples signers la firman off-line, y alguien la publica.
+- DAuthorization: delegar privilegios admin a un módulo de gobernanza on-chain.
 
 ### Invocar
 
