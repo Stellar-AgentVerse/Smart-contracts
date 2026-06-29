@@ -1,4 +1,7 @@
-use soroban_sdk::{contract, contractevent, contractimpl, contracterror, symbol_short, vec, Address, Env, IntoVal, String, Symbol, Val, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractevent, contractimpl, vec, Address, Env, IntoVal, String,
+    Symbol, Val, Vec,
+};
 
 use crate::storage::types::{DataKey, Prompt};
 
@@ -145,11 +148,7 @@ impl PromptMarketplace {
         assert!(new_price > 0, "price must be positive");
 
         let key = DataKey::Prompt(prompt_id.clone());
-        let mut prompt: Prompt = e
-            .storage()
-            .instance()
-            .get(&key)
-            .expect("prompt not found");
+        let mut prompt: Prompt = e.storage().instance().get(&key).expect("prompt not found");
         prompt.price = new_price;
         e.storage().instance().set(&key, &prompt);
 
@@ -184,11 +183,7 @@ impl PromptMarketplace {
         buyer.require_auth();
 
         let key = DataKey::Prompt(prompt_id.clone());
-        let prompt: Prompt = e
-            .storage()
-            .instance()
-            .get(&key)
-            .expect("prompt not found");
+        let prompt: Prompt = e.storage().instance().get(&key).expect("prompt not found");
 
         let purchase_key = DataKey::Purchase(buyer.clone(), prompt_id.clone());
         assert!(
@@ -252,33 +247,21 @@ impl PromptMarketplace {
     /// Read the price of a prompt.
     pub fn get_price(e: &Env, prompt_id: String) -> i128 {
         let key = DataKey::Prompt(prompt_id);
-        let prompt: Prompt = e
-            .storage()
-            .instance()
-            .get(&key)
-            .expect("prompt not found");
+        let prompt: Prompt = e.storage().instance().get(&key).expect("prompt not found");
         prompt.price
     }
 
     /// Read the content URI for a prompt.
     pub fn get_content_uri(e: &Env, prompt_id: String) -> String {
         let key = DataKey::Prompt(prompt_id);
-        let prompt: Prompt = e
-            .storage()
-            .instance()
-            .get(&key)
-            .expect("prompt not found");
+        let prompt: Prompt = e.storage().instance().get(&key).expect("prompt not found");
         prompt.content_uri
     }
 
     /// Read the prompt owner (creator).
     pub fn get_owner(e: &Env, prompt_id: String) -> Address {
         let key = DataKey::Prompt(prompt_id);
-        let prompt: Prompt = e
-            .storage()
-            .instance()
-            .get(&key)
-            .expect("prompt not found");
+        let prompt: Prompt = e.storage().instance().get(&key).expect("prompt not found");
         prompt.owner
     }
 

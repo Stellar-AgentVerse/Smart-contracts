@@ -3,13 +3,14 @@
 WASM ?= target/wasm32v1-none/release/my_token.wasm
 SOURCE ?= alice
 NETWORK ?= testnet
+HOST_TARGET ?= x86_64-unknown-linux-gnu
 
 default: build
 
 all: test
 
 test: build
-	cargo test
+	cargo test --workspace --target $(HOST_TARGET)
 
 build:
 	SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 stellar contract build
@@ -46,8 +47,11 @@ verify-mainnet:
 fmt:
 	cargo fmt --all
 
+fmt-check:
+	cargo fmt --all -- --check
+
 clippy:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets --target $(HOST_TARGET) -- -D warnings
 
 clean:
 	cargo clean

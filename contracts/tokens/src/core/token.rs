@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, MuxedAddress, String};
-use stellar_tokens::fungible::Base;
 use stellar_access::ownable;
+use stellar_tokens::fungible::Base;
 
 use crate::events::{BurnEvent, MintEvent, SellEvent, TransferEvent};
 
