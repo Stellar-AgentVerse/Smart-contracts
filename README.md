@@ -45,7 +45,11 @@ El token sólo acepta mint/burn cross-contract desde el address configurado en `
 
 Los tests cubren la compra y el remint reales entre contratos, el rechazo de llamadas directas, la configuración única del marketplace y montos no positivos.
 
-La privacidad todavía no está implementada. El marketplace actual publica buyer, prompt y `content_uri`; consultar [ADR 0001](docs/adr/0001-private-access-threat-model.md) antes de diseñar acceso privado.
+### Acceso privado
+
+Según el [ADR 0001](docs/adr/0001-private-access-threat-model.md), el acceso privado usa registros opacos. `register_private_prompt` y `buy_private_prompt` operan sobre un commitment `BytesN<32>` generado off-chain como `SHA256("PMPT_V1" || prompt_id || salt_de_32_bytes)`, así el ledger nunca ve el `prompt_id` ni el `content_uri`. El contrato no puede validar la preimagen porque nunca la recibe: quien registra debe conservar el salt off-chain.
+
+El camino público `buy_prompt` sigue publicando `prompt_id` y `content_uri` en claro. En ambos caminos el buyer, el precio y el momento de compra quedan visibles, y comprar el mismo prompt dos veces es enlazable por el hash. No hay ZK ni relayers. `revoke_private_access` permite al admin invalidar un grant, que de otro modo persiste.
 
 ### Validación reproducible en Testnet
 
@@ -71,12 +75,15 @@ El comando requiere tres aliases de Stellar CLI ya financiados en Testnet. Produ
 | `test_mint_to_different_users` | Mint a múltiples usuarios, supply tracking |
 | `test_mint_overflow_panics` | i128::MAX + 1 debe panic |
 | `test_zero_balance_default` | Balance por defecto es 0 |
+| `test_marketplace_mint_requires_configuration` | Sin `set_marketplace` el mint cross-contract falla |
+| `test_marketplace_mint_updates_balance` | El marketplace configurado sí puede mintear |
+| `test_marketplace_mint_rejects_non_positive_amount` | Monto <= 0 es inválido |
 | `test_direct_marketplace_burn_is_rejected` | Una llamada externa no puede quemar tokens mediante `marketplace_burn` |
 | `test_direct_marketplace_mint_is_rejected` | Una llamada externa no puede mintear mediante `marketplace_mint` |
 | `test_marketplace_cannot_be_reconfigured` | El vínculo token→marketplace sólo se configura una vez |
 | `test_marketplace_mint_rejected_when_paused` | Pausar el token bloquea el mint cross-contract |
 
-### Marketplace: 25 tests
+### Marketplace: 34 tests
 
 | Test | Qué cubre |
 |---|---|
@@ -101,6 +108,19 @@ El comando requiere tres aliases de Stellar CLI ya financiados en Testnet. Produ
 | `test_buy_prompt_emits_event` | `buy_prompt` emite `PromptPurchased` con buyer/prompt_id/price correctos |
 | `test_remint_cross_contract` | E2E: `remint` (cross-contract real vía `invoke_contract`) → balance minteado |
 | `test_remint_emits_event` | `remint` emite `TokensReminted` con admin/to/amount correctos |
+| `test_non_admin_cannot_remint` | No-admin no puede remintear |
+| `test_buy_prompt_unregistered_panics` | Comprar un prompt inexistente falla |
+| `test_buy_prompt_insufficient_balance_panics` | Sin saldo suficiente la compra falla |
+| `test_buy_prompt_same_prompt_twice_panics` | El mismo buyer no puede recomprar el mismo prompt |
+| `test_cross_user_cannot_spend_another_buyers_authorization` | La autorización de un buyer no sirve para gastar el saldo de otro |
+| `test_atomicity_fail_burn` | Si el burn falla, no queda entitlement parcial |
+| `test_register_and_buy_private_prompt` | E2E opaco: register → buy sobre commitment `BytesN<32>` |
+| `test_buy_private_prompt_replay_panics` | La compra privada no se puede replayear |
+| `test_buy_unregistered_private_prompt_panics` | Comprar un commitment no registrado falla |
+| `test_unauthorized_private_prompt_registration` | No-admin no puede registrar un prompt privado |
+| `test_register_private_prompt_emits_event` | El evento privado no expone `prompt_id` ni `content_uri` |
+| `test_admin_can_revoke_private_access` | El admin puede invalidar un grant privado |
+| `test_migration_compatibility` | Los registros públicos previos siguen siendo válidos |
 
 ---
 
