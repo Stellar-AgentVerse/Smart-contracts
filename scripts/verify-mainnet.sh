@@ -182,6 +182,7 @@ TOKEN_SYMBOL_CHAIN=$(stellar_invoke "$TOKEN_ID" symbol | tr -d '"')
 TOKEN_DECIMALS_CHAIN=$(stellar_invoke "$TOKEN_ID" decimals)
 TOKEN_SUPPLY_CHAIN=$(stellar_invoke "$TOKEN_ID" total_supply)
 TOKEN_OWNER_CHAIN=$(stellar_invoke "$TOKEN_ID" owner | tr -d '"')
+TOKEN_MARKETPLACE_CHAIN=$(stellar_invoke "$TOKEN_ID" get_marketplace | tr -d '"')
 
 if [[ "$TOKEN_NAME_CHAIN" != "$TOKEN_NAME" ]]; then
   fail "Token name mismatch. Expected: ${TOKEN_NAME}, Got: ${TOKEN_NAME_CHAIN}"
@@ -207,6 +208,11 @@ if [[ "$TOKEN_OWNER_CHAIN" != "$ADMIN_ADDR" ]]; then
   fail "Token owner mismatch. Expected: ${ADMIN_ADDR}, Got: ${TOKEN_OWNER_CHAIN}"
 fi
 log_ok "Token owner: ${TOKEN_OWNER_CHAIN}"
+
+if [[ "$TOKEN_MARKETPLACE_CHAIN" != "$MKT_ID" ]]; then
+  fail "Token marketplace mismatch. Expected: ${MKT_ID}, Got: ${TOKEN_MARKETPLACE_CHAIN}"
+fi
+log_ok "Token marketplace: ${TOKEN_MARKETPLACE_CHAIN}"
 
 # ── Verify Marketplace state ────────────────────────────────────────────────
 
@@ -248,6 +254,8 @@ cat > "$REPORT_FILE" <<EOF
     "actual_decimals": ${TOKEN_DECIMALS_CHAIN},
     "expected_supply": "0",
     "actual_supply": "${TOKEN_SUPPLY_CHAIN}",
+    "expected_marketplace": "${MKT_ID}",
+    "actual_marketplace": "${TOKEN_MARKETPLACE_CHAIN}",
     "local_wasm_hash": "${LOCAL_TOKEN_HASH}",
     "wasm_path": "${TOKEN_WASM}"
   },
@@ -268,6 +276,7 @@ cat > "$REPORT_FILE" <<EOF
     "token_decimals_ok": true,
     "token_supply_ok": true,
     "token_owner_ok": true,
+    "token_marketplace_ok": true,
     "marketplace_admin_ok": true,
     "marketplace_token_ok": true
   },

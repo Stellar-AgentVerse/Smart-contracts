@@ -119,6 +119,7 @@ stellar_invoke() {
     --id "$contract_id" \
     --source "$source" \
     --network "$NETWORK" \
+    --send=yes \
     -- "$@"
 }
 
@@ -228,6 +229,14 @@ stellar_invoke "$MARKETPLACE_ID" "$MAINNET_ADMIN_SOURCE" \
 
 log_ok "PromptMarketplace initialized"
 
+# Configure the one-time trusted caller on MyToken after both contract IDs
+# exist. Without this step marketplace mint/burn operations are rejected.
+stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" \
+  set_marketplace \
+  --marketplace "$MARKETPLACE_ID"
+
+log_ok "MyToken trusted marketplace configured"
+
 # ── Post-deploy validation ──────────────────────────────────────────────────
 
 log_section "Post-Deploy Validation"
@@ -238,6 +247,7 @@ TOKEN_SYMBOL_ON_CHAIN=$(stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" sy
 TOKEN_DECIMALS_ON_CHAIN=$(stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" decimals)
 TOKEN_SUPPLY_ON_CHAIN=$(stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" total_supply)
 TOKEN_OWNER_ON_CHAIN=$(stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" owner | tr -d '"')
+TOKEN_MARKETPLACE_ON_CHAIN=$(stellar_invoke "$MY_TOKEN_ID" "$MAINNET_ADMIN_SOURCE" get_marketplace | tr -d '"')
 
 if [[ "$TOKEN_NAME_ON_CHAIN" != "$TOKEN_NAME" ]]; then
   fail "Token name mismatch: expected '${TOKEN_NAME}', got '${TOKEN_NAME_ON_CHAIN}'"
@@ -254,8 +264,11 @@ fi
 if [[ "$TOKEN_OWNER_ON_CHAIN" != "$MAINNET_ADMIN_ADDR" ]]; then
   fail "Token owner mismatch: expected '${MAINNET_ADMIN_ADDR}', got '${TOKEN_OWNER_ON_CHAIN}'"
 fi
+if [[ "$TOKEN_MARKETPLACE_ON_CHAIN" != "$MARKETPLACE_ID" ]]; then
+  fail "Token marketplace mismatch: expected '${MARKETPLACE_ID}', got '${TOKEN_MARKETPLACE_ON_CHAIN}'"
+fi
 
-log_ok "MyToken validation passed (name, symbol, decimals, supply=0, owner)"
+log_ok "MyToken validation passed (name, symbol, decimals, supply=0, owner, marketplace)"
 
 # 2. Verify marketplace admin and token linkage
 MKT_ADMIN_ON_CHAIN=$(stellar_invoke "$MARKETPLACE_ID" "$MAINNET_ADMIN_SOURCE" get_admin | tr -d '"')
@@ -319,6 +332,7 @@ cat > "$SUMMARY_FILE" <<EOF
     "wasm_hash": "${TOKEN_WASM_HASH}",
     "wasm_path": "${TOKEN_WASM}",
     "owner": "${MAINNET_ADMIN_ADDR}",
+    "marketplace": "${TOKEN_MARKETPLACE_ON_CHAIN}",
     "initial_supply": "${TOKEN_SUPPLY_ON_CHAIN}"
   },
   "marketplace": {
@@ -333,6 +347,7 @@ cat > "$SUMMARY_FILE" <<EOF
   "verification": {
     "token_metadata_ok": true,
     "token_owner_ok": true,
+    "token_marketplace_ok": true,
     "token_supply_ok": true,
     "marketplace_admin_ok": true,
     "marketplace_token_ok": true,
