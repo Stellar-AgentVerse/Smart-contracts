@@ -1,12 +1,13 @@
 #![cfg(all(test, not(target_family = "wasm")))]
 
 use crate::contract::{
-    PromptMarketplace, PromptMarketplaceClient, PromptPurchased, TokensReminted,
+    PrivatePromptPurchased, PrivatePromptRegistered, PromptMarketplace, PromptMarketplaceClient,
+    PromptPurchased, TokensReminted,
 };
 use my_token::MyToken;
 use soroban_sdk::{
     testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke},
-    Address, Env, Event, IntoVal, String,
+    Address, Bytes, BytesN, Env, Event, IntoVal, String,
 };
 use stellar_tokens::fungible::Base as TokenBase;
 
@@ -958,4 +959,437 @@ fn test_remint_emits_event() {
         .all()
         .events()
         .contains(&expected.to_xdr(&env, &mkt_id)));
+}
+
+// ─── Private Prompts (Opaque Access) ─────────────────────
+
+// Test-only deterministic fixture for the documented commitment format:
+// SHA256("PMPT_V1" || prompt_id || high-entropy salt). Production callers
+// must generate a fresh cryptographically-random salt for every prompt.
+fn private_commitment(env: &Env) -> BytesN<32> {
+    env.crypto()
+        .sha256(&Bytes::from_slice(
+        env,
+        b"PMPT_V1\0private-test-prompt\0\x9d\x8b\x3f\xa1\x72\x19\xc4\x5e\x0a\xb7\x61\xde\x34\x90\x28\xf6\x4c\x83\x15\xaa\xe9\x06\xd2\x7b\x11\x68\xbf\x42\x95\x3c\xf0\x7d",
+    ))
+        .into()
+}
+
+#[test]
+fn test_register_and_buy_private_prompt() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    assert!(!mkt.has_private_access(&buyer, &prompt_hash));
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+
+    // Read events immediately before the next contract invocation resets the buffer
+    let expected_event = PrivatePromptPurchased {
+        buyer: buyer.clone(),
+        prompt_hash: prompt_hash.clone(),
+        price: 500,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected_event.to_xdr(&env, &mkt_id)));
+
+    assert!(mkt.has_private_access(&buyer, &prompt_hash));
+    let bal: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
+    assert_eq!(bal, 500);
+}
+
+#[test]
+#[should_panic(expected = "already purchased")]
+fn test_buy_private_prompt_replay_panics() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 1000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_unauthorized_private_prompt_registration() {
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        buyer,
+        creator,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+}
+
+#[test]
+#[should_panic(expected = "prompt not found")]
+fn test_buy_unregistered_private_prompt_panics() {
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        buyer,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+}
+
+#[test]
+fn test_register_private_prompt_emits_event() {
+    let Ctx {
+        env,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    let expected = PrivatePromptRegistered {
+        admin: admin.clone(),
+        owner: creator,
+        prompt_hash: prompt_hash.clone(),
+        price: 500,
+    };
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&expected.to_xdr(&env, &mkt_id)));
+}
+
+#[test]
+fn test_cross_user_cannot_spend_another_buyers_authorization() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        ..
+    } = setup_env();
+    let buyer2 = Address::generate(&env);
+
+    let prompt_hash = BytesN::from_array(&env, &[6u8; 32]);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    env.as_contract(&token_id, || TokenBase::mint(&env, &buyer, 1000));
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+
+    assert!(mkt.has_private_access(&buyer, &prompt_hash));
+    assert!(!mkt.has_private_access(&buyer2, &prompt_hash));
+
+    let result = mkt
+        .mock_auths(&[MockAuth {
+            address: &buyer2,
+            invoke: &MockAuthInvoke {
+                contract: &mkt_id,
+                fn_name: "buy_private_prompt",
+                args: (&buyer, &prompt_hash).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_buy_private_prompt(&buyer, &prompt_hash);
+
+    assert!(result.is_err());
+    assert!(!mkt.has_private_access(&buyer2, &prompt_hash));
+}
+
+#[test]
+fn test_atomicity_fail_burn() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    env.as_contract(&token_id, || TokenBase::mint(&env, &buyer, 100));
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    let result = mkt
+        .mock_auths(&[MockAuth {
+            address: &buyer,
+            invoke: &MockAuthInvoke {
+                contract: &mkt_id,
+                fn_name: "buy_private_prompt",
+                args: (&buyer, &prompt_hash).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_buy_private_prompt(&buyer, &prompt_hash);
+
+    assert!(result.is_err());
+    assert!(!mkt.has_private_access(&buyer, &prompt_hash));
+    let balance: i128 = env.as_contract(&token_id, || TokenBase::balance(&env, &buyer));
+    assert_eq!(balance, 100);
+}
+
+#[test]
+fn test_migration_compatibility() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        uri,
+        ..
+    } = setup_env();
+    let prompt_id = String::from_str(&env, "legacy_prompt");
+    let prompt_hash = private_commitment(&env);
+
+    env.as_contract(&token_id, || {
+        TokenBase::mint(&env, &buyer, 2000);
+    });
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_prompt",
+            args: (&prompt_id, 500i128, &creator, &uri).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_prompt(&prompt_id, &500, &creator, &uri);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_prompt",
+            args: (&buyer, &prompt_id).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_prompt(&buyer, &prompt_id);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+
+    assert!(mkt.has_access(&buyer, &prompt_id));
+    assert!(mkt.has_private_access(&buyer, &prompt_hash));
+}
+
+#[test]
+fn test_admin_can_revoke_private_access() {
+    let Ctx {
+        env,
+        token_id,
+        mkt,
+        mkt_id,
+        admin,
+        creator,
+        buyer,
+        ..
+    } = setup_env();
+    let prompt_hash = private_commitment(&env);
+
+    env.as_contract(&token_id, || TokenBase::mint(&env, &buyer, 1000));
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "register_private_prompt",
+            args: (&prompt_hash, 500i128, &creator).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .register_private_prompt(&prompt_hash, &500, &creator);
+    mkt.mock_auths(&[MockAuth {
+        address: &buyer,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "buy_private_prompt",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .buy_private_prompt(&buyer, &prompt_hash);
+
+    mkt.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &mkt_id,
+            fn_name: "revoke_private_access",
+            args: (&buyer, &prompt_hash).into_val(&env),
+            sub_invokes: &[],
+        },
+    }])
+    .revoke_private_access(&buyer, &prompt_hash);
+
+    assert!(!mkt.has_private_access(&buyer, &prompt_hash));
 }

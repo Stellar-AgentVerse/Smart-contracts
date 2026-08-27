@@ -1,10 +1,10 @@
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contracterror, contractevent, contractimpl, vec, Address, Env, IntoVal, String,
-    Symbol, Val, Vec,
+    contract, contracterror, contractevent, contractimpl, vec, Address, BytesN, Env, IntoVal,
+    String, Symbol, Val, Vec,
 };
 
-use crate::storage::types::{DataKey, Prompt};
+use crate::storage::types::{DataKey, PrivatePrompt, Prompt};
 
 /// Contract errors for prompt-marketplace operations.
 #[contracterror]
@@ -74,6 +74,40 @@ pub struct TokensReminted {
     #[topic]
     pub to: Address,
     pub amount: i128,
+}
+
+/// Emitted when an admin registers a new private prompt.
+#[contractevent(data_format = "map", topics = ["private_prompt_registered_v1"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivatePromptRegistered {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub prompt_hash: BytesN<32>,
+    pub price: i128,
+    pub owner: Address,
+}
+
+/// Emitted when a user buys a private prompt (tokens burned).
+#[contractevent(data_format = "single-value", topics = ["private_prompt_purchased_v1"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivatePromptPurchased {
+    #[topic]
+    pub buyer: Address,
+    #[topic]
+    pub prompt_hash: BytesN<32>,
+    pub price: i128,
+}
+
+/// Emitted when the administrator invalidates a private access grant.
+#[contractevent(data_format = "single-value", topics = ["private_access_revoked_v1"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateAccessRevoked {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub buyer: Address,
+    pub prompt_hash: BytesN<32>,
 }
 
 /// A Soroban contract that lets admins register prompts for sale,
@@ -174,6 +208,37 @@ impl PromptMarketplace {
         .publish(e);
     }
 
+    // ─── Admin: private prompt management ────────────────────
+
+    /// Register a new private prompt using an opaque hash.
+    pub fn register_private_prompt(e: &Env, prompt_hash: BytesN<32>, price: i128, owner: Address) {
+        Self::enforce_admin(e);
+        assert!(price > 0, "price must be positive");
+
+        let key = DataKey::PrivatePrompt(prompt_hash.clone());
+        assert!(
+            e.storage()
+                .instance()
+                .get::<_, PrivatePrompt>(&key)
+                .is_none(),
+            "prompt already registered"
+        );
+
+        let prompt = PrivatePrompt {
+            price,
+            owner: owner.clone(),
+        };
+        e.storage().instance().set(&key, &prompt);
+
+        PrivatePromptRegistered {
+            admin: Self::get_admin(e),
+            prompt_hash,
+            price: prompt.price,
+            owner,
+        }
+        .publish(e);
+    }
+
     // ─── User: purchase flow ─────────────────────────────────
 
     /// Buy a prompt. The buyer authenticates, their tokens are burned
@@ -211,6 +276,60 @@ impl PromptMarketplace {
         .publish(e);
     }
 
+    // ─── User: private purchase flow ─────────────────────────
+
+    /// Buy a private prompt using its opaque hash.
+    pub fn buy_private_prompt(e: &Env, buyer: Address, prompt_hash: BytesN<32>) {
+        buyer.require_auth();
+
+        let key = DataKey::PrivatePrompt(prompt_hash.clone());
+        let prompt: PrivatePrompt = e.storage().instance().get(&key).expect("prompt not found");
+
+        let purchase_key = DataKey::PrivatePurchase(buyer.clone(), prompt_hash.clone());
+        assert!(
+            !e.storage().instance().get(&purchase_key).unwrap_or(false),
+            "already purchased"
+        );
+
+        let token = Self::get_token(e);
+        let sell_sym = Symbol::new(e, "marketplace_burn");
+        let sell_args: Vec<Val> = vec![&e, buyer.clone().into_val(e), prompt.price.into_val(e)];
+        Self::authorize_token_call(e, &token, sell_sym.clone(), sell_args.clone());
+        let _: () = e.invoke_contract(&token, &sell_sym, sell_args);
+
+        e.storage().instance().set(&purchase_key, &true);
+
+        PrivatePromptPurchased {
+            buyer,
+            prompt_hash,
+            price: prompt.price,
+        }
+        .publish(e);
+    }
+
+    /// Invalidate a private grant. Grants otherwise persist until the
+    /// marketplace instance expires or is upgraded.
+    pub fn revoke_private_access(e: &Env, buyer: Address, prompt_hash: BytesN<32>) {
+        Self::enforce_admin(e);
+
+        let purchase_key = DataKey::PrivatePurchase(buyer.clone(), prompt_hash.clone());
+        assert!(
+            e.storage()
+                .instance()
+                .get::<_, bool>(&purchase_key)
+                .unwrap_or(false),
+            "private access not found"
+        );
+        e.storage().instance().remove(&purchase_key);
+
+        PrivateAccessRevoked {
+            admin: Self::get_admin(e),
+            buyer,
+            prompt_hash,
+        }
+        .publish(e);
+    }
+
     // ─── Admin: re-mint tokens ───────────────────────────────
 
     /// Re-mint tokens back into circulation.
@@ -236,6 +355,12 @@ impl PromptMarketplace {
     }
 
     // ─── Queries ─────────────────────────────────────────────
+
+    /// Check whether a user has purchased a specific private prompt.
+    pub fn has_private_access(e: &Env, user: Address, prompt_hash: BytesN<32>) -> bool {
+        let key = DataKey::PrivatePurchase(user, prompt_hash);
+        e.storage().instance().get(&key).unwrap_or(false)
+    }
 
     /// Check whether a user has purchased a specific prompt.
     pub fn has_access(e: &Env, user: Address, prompt_id: String) -> bool {
