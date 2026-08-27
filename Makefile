@@ -3,14 +3,18 @@
 WASM ?= target/wasm32v1-none/release/my_token.wasm
 SOURCE ?= alice
 NETWORK ?= testnet
-HOST_TARGET ?= x86_64-unknown-linux-gnu
+HOST_TARGET ?= $(shell rustc -vV | grep 'host:' | awk '{print $$2}')
+# Fallback: if detection fails, default to x86_64-unknown-linux-gnu
+ifeq ($(HOST_TARGET),)
+HOST_TARGET := x86_64-unknown-linux-gnu
+endif
 
 default: build
 
 all: test
 
 test: build
-	cargo test --workspace --target $(HOST_TARGET)
+	SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo test --workspace --target $(HOST_TARGET)
 
 build:
 	SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 stellar contract build
@@ -52,6 +56,18 @@ fmt-check:
 
 clippy:
 	cargo clippy --workspace --all-targets --target $(HOST_TARGET) -- -D warnings
+
+audit:
+	@command -v cargo-audit >/dev/null 2>&1 || (echo "cargo-audit is required. Install it with: cargo install cargo-audit"; exit 1)
+	@if [ -n "$(CARGO_AUDIT_HOME)" ]; then CARGO_HOME="$(CARGO_AUDIT_HOME)" cargo audit; else cargo audit; fi
+
+verify: test fmt-check clippy audit
+
+# Deploy fresh contracts and run positive and adversarial Testnet checks.
+# Required: NETWORK=testnet VALIDATION_DEPLOYER_SOURCE=... \
+#           VALIDATION_ADMIN_SOURCE=... VALIDATION_BUYER_SOURCE=...
+verify-testnet:
+	bash scripts/validate-testnet.sh
 
 clean:
 	cargo clean

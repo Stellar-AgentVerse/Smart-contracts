@@ -1,4 +1,10 @@
-use soroban_sdk::contracterror;
+use soroban_sdk::{contracterror, contracttype};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DataKey {
+    Marketplace,
+}
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

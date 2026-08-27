@@ -3,6 +3,7 @@ target
 /target
 **/target/
 *.wasm
+deploy-artifacts/
 
 # Local settings
 .soroban

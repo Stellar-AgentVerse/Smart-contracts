@@ -25,7 +25,7 @@ impl PrivateAccessPrototype {
         }
 
         // Simulate atomic token deduction here
-        // TokenClient::new(&e, &token_address).sell_forwarded(...);
+        // TokenClient::new(&e, &token_address).marketplace_burn(...);
 
         // Store the exact opaque hash. No plaintext prompt_id is recorded.
         e.storage().persistent().set(&access_key, &true);

@@ -5,7 +5,7 @@ use stellar_macros::{only_owner, when_not_paused};
 use stellar_tokens::fungible::burnable::FungibleBurnable;
 use stellar_tokens::fungible::{Base, FungibleToken};
 
-use crate::core::token::TokenManager;
+use crate::{core::token::TokenManager, storage::types::DataKey};
 
 // SEP-0046 contract metadata embedded in the WASM binary.
 soroban_sdk::contractmeta!(
@@ -26,6 +26,29 @@ impl MyToken {
         TokenManager::initialize(e, owner, name, symbol, decimals);
     }
 
+    /// Configure the single marketplace allowed to mint and burn through
+    /// contract-to-contract calls. This is intentionally one-time setup.
+    #[only_owner]
+    pub fn set_marketplace(e: &Env, marketplace: Address) {
+        assert!(
+            e.storage()
+                .instance()
+                .get::<_, Address>(&DataKey::Marketplace)
+                .is_none(),
+            "marketplace already configured"
+        );
+        e.storage()
+            .instance()
+            .set(&DataKey::Marketplace, &marketplace);
+    }
+
+    pub fn get_marketplace(e: &Env) -> Address {
+        e.storage()
+            .instance()
+            .get(&DataKey::Marketplace)
+            .expect("marketplace not configured")
+    }
+
     #[only_owner]
     #[when_not_paused]
     pub fn mint(e: &Env, to: Address, amount: i128) {
@@ -37,18 +60,20 @@ impl MyToken {
         TokenManager::sell(e, &seller, amount);
     }
 
-    /// Same as `sell` but without `require_auth`. Intended for contract-to-contract
-    /// calls (e.g. marketplace) where auth is forwarded from the root invocation.
+    /// Burn tokens on behalf of the configured marketplace.
     #[when_not_paused]
-    pub fn sell_forwarded(e: &Env, seller: Address, amount: i128) {
-        TokenManager::sell_forwarded(e, &seller, amount);
+    pub fn marketplace_burn(e: &Env, seller: Address, amount: i128) {
+        let marketplace = Self::get_marketplace(e);
+        marketplace.require_auth();
+        TokenManager::marketplace_burn(e, &seller, amount);
     }
 
-    /// Same as `mint` but without `require_auth`. Intended for contract-to-contract
-    /// calls (e.g. marketplace `remint`) where auth is forwarded from the root.
+    /// Mint tokens on behalf of the configured marketplace.
     #[when_not_paused]
-    pub fn mint_forwarded(e: &Env, to: Address, amount: i128) {
-        TokenManager::mint(e, &to, amount);
+    pub fn marketplace_mint(e: &Env, to: Address, amount: i128) {
+        let marketplace = Self::get_marketplace(e);
+        marketplace.require_auth();
+        TokenManager::marketplace_mint(e, &to, amount);
     }
 }
 

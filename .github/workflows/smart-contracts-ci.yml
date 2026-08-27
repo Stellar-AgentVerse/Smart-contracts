@@ -66,4 +66,4 @@ jobs:
         run: make fmt-check
 
       - name: Audit dependencies
-        run: cargo audit
+        run: make audit
