@@ -13,6 +13,7 @@ impl TokenManager {
     }
 
     pub fn mint(e: &Env, to: &Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
         Base::mint(e, to, amount);
         MintEvent {
             admin: ownable::get_owner(e).unwrap(),
@@ -51,6 +52,7 @@ impl TokenManager {
     /// Uses `Base::update` directly instead of `Base::burn` to avoid a double
     /// `require_auth` (Base::burn also calls `from.require_auth()`).
     pub fn sell(e: &Env, seller: &Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
         seller.require_auth();
         Base::update(e, Some(seller), None, amount);
         SellEvent {
@@ -60,18 +62,22 @@ impl TokenManager {
         .publish(e);
     }
 
-    /// Same as `sell` but WITHOUT `require_auth`. Call this when auth is
-    /// forwarded from a root invocation (e.g., a marketplace calling
-    /// `buy_prompt` which already called `buyer.require_auth()`).
-    ///
-    /// # Safety
-    ///
-    /// The caller MUST ensure the seller has authorized the action at the
-    /// root invocation level, otherwise tokens can be burned from any account.
-    pub fn sell_forwarded(e: &Env, seller: &Address, amount: i128) {
+    pub fn marketplace_burn(e: &Env, seller: &Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
         Base::update(e, Some(seller), None, amount);
         SellEvent {
             seller: seller.clone(),
+            amount,
+        }
+        .publish(e);
+    }
+
+    pub fn marketplace_mint(e: &Env, to: &Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
+        Base::mint(e, to, amount);
+        MintEvent {
+            admin: ownable::get_owner(e).unwrap(),
+            to: to.clone(),
             amount,
         }
         .publish(e);

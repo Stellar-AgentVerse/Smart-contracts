@@ -1,9 +1,12 @@
 #![cfg(test)]
 extern crate std;
 
-use crate::events::{MintEvent, SellEvent};
+use crate::events::MintEvent;
 use crate::{MyToken, MyTokenClient};
-use soroban_sdk::{testutils::Address as _, testutils::Events as _, Address, Env, Event, String};
+use soroban_sdk::{
+    testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke},
+    Address, Env, Event, IntoVal, String,
+};
 use stellar_access::ownable;
 use stellar_tokens::fungible::Base as TokenBase;
 
@@ -131,70 +134,111 @@ fn test_zero_balance_default() {
     assert_eq!(bal, 0);
 }
 
-// ─── `*_forwarded` cross-contract trust boundary ───────────
-//
-// `sell_forwarded` and `mint_forwarded` deliberately skip `require_auth()`
-// so the marketplace can call them after it already authorized the root
-// invocation (see `contracts/marketplace/src/contract.rs::buy_prompt` /
-// `remint`). That means these two functions are the highest-risk surface
-// in the whole workspace: any caller, not just the marketplace, can invoke
-// them directly with NO authorization check on `seller`/`to` whatsoever.
-//
-// These tests invoke them directly via the public client with no
-// `mock_auths()` set up at all, proving (a) the burn/mint logic behaves
-// correctly and (b) the functions truly require no auth to execute —
-// which is exactly the property that makes them dangerous outside the
-// marketplace's controlled call path.
-
 #[test]
-fn test_sell_forwarded_updates_balance() {
+#[should_panic(expected = "marketplace not configured")]
+fn test_marketplace_mint_requires_configuration() {
     let (env, contract_id, user) = setup_env();
     let client = MyTokenClient::new(&env, &contract_id);
 
-    env.as_contract(&contract_id, || {
-        TokenBase::mint(&env, &user, 1000);
-    });
-
-    // No mock_auths() anywhere — sell_forwarded must succeed without
-    // the seller ever authorizing this call directly.
-    client.sell_forwarded(&user, &400);
-
-    // Events must be read before any further contract invocation — each
-    // top-level call resets the recorded event buffer. `Base::update`
-    // also publishes its own SEP-41 event, so check our custom `SellEvent`
-    // is present rather than asserting on the full (implementation-coupled)
-    // event list.
-    let expected = SellEvent {
-        seller: user.clone(),
-        amount: 400,
-    };
-    assert!(env
-        .events()
-        .all()
-        .events()
-        .contains(&expected.to_xdr(&env, &contract_id)));
-
-    assert_eq!(client.balance(&user), 600);
-    assert_eq!(client.total_supply(), 600);
+    client.marketplace_mint(&user, &750);
 }
 
 #[test]
-fn test_mint_forwarded_mints_tokens() {
+#[should_panic]
+fn test_direct_marketplace_mint_is_rejected() {
     let (env, contract_id, user) = setup_env();
     let client = MyTokenClient::new(&env, &contract_id);
     let owner = env
         .as_contract(&contract_id, || ownable::get_owner(&env))
         .expect("owner must be set");
+    let marketplace = Address::generate(&env);
 
-    // No mock_auths() anywhere — mint_forwarded must succeed without
-    // the contract owner authorizing this call directly.
-    client.mint_forwarded(&user, &750);
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&marketplace);
 
-    // Events must be read before any further contract invocation — each
-    // top-level call resets the recorded event buffer. `Base::mint`
-    // also publishes its own SEP-41 event, so check our custom `MintEvent`
-    // is present rather than asserting on the full (implementation-coupled)
-    // event list.
+    // A configured marketplace contract must authorize this call. A direct
+    // external caller cannot authenticate as that contract address.
+    client.marketplace_mint(&user, &750);
+}
+
+#[test]
+#[should_panic(expected = "marketplace already configured")]
+fn test_marketplace_cannot_be_reconfigured() {
+    let (env, contract_id, ..) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+    let first_marketplace = Address::generate(&env);
+    let second_marketplace = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&first_marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&first_marketplace);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&second_marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&second_marketplace);
+}
+
+#[test]
+fn test_marketplace_mint_updates_balance() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let marketplace = Address::generate(&env);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&marketplace);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &marketplace,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "marketplace_mint",
+                args: (&user, 750i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .marketplace_mint(&user, &750);
+
     let expected = MintEvent {
         admin: owner,
         to: user.clone(),
@@ -208,4 +252,117 @@ fn test_mint_forwarded_mints_tokens() {
 
     assert_eq!(client.balance(&user), 750);
     assert_eq!(client.total_supply(), 750);
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn test_marketplace_mint_rejects_non_positive_amount() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let marketplace = Address::generate(&env);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&marketplace);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &marketplace,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "marketplace_mint",
+                args: (&user, 0i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .marketplace_mint(&user, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_direct_marketplace_burn_is_rejected() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+    let marketplace = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TokenBase::mint(&env, &user, 1000);
+    });
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&marketplace);
+
+    // A direct external caller cannot authenticate as the configured
+    // marketplace contract.
+    client.marketplace_burn(&user, &400);
+}
+
+#[test]
+#[should_panic]
+fn test_marketplace_mint_rejected_when_paused() {
+    let (env, contract_id, user) = setup_env();
+    let client = MyTokenClient::new(&env, &contract_id);
+    let owner = env
+        .as_contract(&contract_id, || ownable::get_owner(&env))
+        .expect("owner must be set");
+    let marketplace = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_marketplace",
+                args: (&marketplace,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_marketplace(&marketplace);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &owner,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "pause",
+                args: (&owner,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .pause(&owner);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &marketplace,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "marketplace_mint",
+                args: (&user, 750i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .marketplace_mint(&user, &750);
 }
